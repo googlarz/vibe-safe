@@ -1,6 +1,6 @@
 # vibe-safe
 
-**Without this skill: 0/5 risks caught. With this skill: 5/5 caught.**
+**Covers 15 risk categories. Without this skill: 0 caught. With this skill: all caught.**
 
 A Claude Code skill that acts as an active session guardian for non-technical contributors — PMs, designers, researchers — shipping AI-assisted code in shared codebases.
 
@@ -13,10 +13,20 @@ The difference from a checklist: **Claude reads your actual git state and scans 
 | Risk | Without vibe-safe | With vibe-safe |
 |------|------------------|----------------|
 | Credential committed (not in diff) | Missed — not in staged files | Caught — full-repo grep, `src/api/client.ts:14` |
-| Committing directly to main | No check | Stopped immediately, feature branch created |
-| Config/auth/migration files in diff | No check | Flagged with escalation instruction |
+| Committing directly to main | No check | Stopped — feature branch created automatically |
+| Config/auth/migration/quality-gate files in diff | No check | Flagged with escalation instruction |
 | Merging conflict by accepting all "theirs" | No check | Both sides explained, Danger Zone → stop |
 | Claude lowered a quality threshold to pass CI | No check | Caught — diff scanned for numeric decreases in quality configs |
+| `@ts-ignore` / `eslint-disable` added | No check | Flagged — suppressed error, not fixed |
+| Failing test skipped with `.skip()` | No check | Flagged — bypassed test, not fixed |
+| Test file deleted | No check | Flagged — suite passes by omission |
+| `console.log` / `debugger` left in code | No check | Flagged — debug artifact in production |
+| Empty `catch {}` block | No check | Flagged — errors silently swallowed |
+| Lock file changed without `package.json` | No check | Flagged — undocumented dependency change |
+| Binary file committed | No check | Flagged — permanent history bloat |
+| PII in committed code | No check | Flagged — email/phone pattern on added lines |
+| Internal hostname committed | No check | Flagged — infrastructure topology exposed |
+| Claude proposes `git push --force` | No check | Auto-escalates to ALARM |
 
 ---
 
@@ -45,6 +55,37 @@ Claude proposed something that feels big → ALARM mode
 Or invoke directly: `vibe-safe commit` / `vibe-safe before` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
+
+---
+
+## v1.2.0: 10 new risk categories — covers 15 total
+
+**Suppression (Claude hiding problems instead of fixing them):**
+- `@ts-ignore`, `@ts-nocheck`, `eslint-disable` added to staged diff
+- Empty `catch {}` blocks — errors silently swallowed
+
+**Test integrity:**
+- `.skip()`, `xit(`, `xdescribe(` — tests bypassed instead of fixed
+- Test files deleted to make the suite pass
+
+**Debug artifacts:**
+- `console.log`, `debugger` left in non-test files
+
+**Dependency hygiene:**
+- Lock file changed without `package.json` (or vice versa)
+- New package added — surfaced for license/security review
+- Binary file staged — permanent history bloat
+
+**Data exposure:**
+- PII patterns (email, phone) on added lines
+- Internal hostnames / IPs committed
+
+**Agentic escalation:**
+- `git push --force` proposed by Claude → auto-routes to ALARM
+- Direct database commands proposed → auto-routes to ALARM
+- CI check skipped via workflow edit → auto-routes to ALARM
+
+All checks added to the pre-commit hook (runs without Claude).
 
 ---
 

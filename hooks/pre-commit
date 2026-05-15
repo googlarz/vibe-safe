@@ -1,38 +1,42 @@
 #!/bin/sh
 # vibe-safe pre-commit hook
-# Runs mechanical safety checks on every commit — no Claude required.
+# Mechanical safety checks on every commit — no Claude required.
 # Install: cp ~/.claude/skills/vibe-safe/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 
 CRED_PATTERN="sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="
 
+bail() {
+  echo ""
+  echo "vibe-safe: $1"
+  echo "$2"
+  echo ""
+  echo "$3"
+  echo ""
+  exit 1
+}
+
 # 1. Branch check
 BRANCH=$(git branch --show-current 2>/dev/null)
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-  echo ""
-  echo "vibe-safe: STOP -- committing directly to $BRANCH."
-  echo "Create a branch: git checkout -b feature/your-change-name"
-  echo ""
-  exit 1
+  bail "STOP -- committing directly to $BRANCH." "" \
+    "Create a branch: git checkout -b feature/your-change-name"
 fi
 
 # 2. Credential scan across ALL tracked files (not just staged)
 CREDS=$(git grep -nE "$CRED_PATTERN" 2>/dev/null)
 if [ -n "$CREDS" ]; then
-  echo ""
-  echo "vibe-safe: STOP -- credential pattern found in tracked files:"
-  echo "$CREDS"
-  echo ""
-  echo "Credentials in git history are permanent even after deletion."
-  echo "Run: vibe-safe commit"
-  echo ""
-  exit 1
+  bail "STOP -- credential pattern found in tracked files:" "$CREDS" \
+    "Credentials in git history are permanent even after deletion. Run: vibe-safe commit"
 fi
 
-# 3. Danger zone check on staged files
-STAGED=$(git diff --cached --name-only 2>/dev/null)
-DANGER=""
+# Capture staged diff once for all diff-based checks
+STAGED_DIFF=$(git diff --cached 2>/dev/null)
+ADDED=$(echo "$STAGED_DIFF" | grep "^+" | grep -v "^+++" 2>/dev/null)
+STAGED_FILES=$(git diff --cached --name-only 2>/dev/null)
 
-for f in $STAGED; do
+# 3. Danger zone check on staged files
+DANGER=""
+for f in $STAGED_FILES; do
   case "$f" in
     .env|.env.*|*.conf|Dockerfile|docker-compose*|\
     .github/workflows/*|Jenkinsfile|.circleci/*|.gitlab-ci.yml|\
@@ -40,7 +44,8 @@ for f in $STAGED; do
     webpack.config.*|vite.config.*|tsconfig.json|\
     jest.config.*|vitest.config.*|codecov.yml|.nycrc|sonar-project.properties|\
     package.json|Gemfile|requirements.txt)
-      DANGER="  $f (infrastructure/config/deps/quality-gate)"
+      DANGER="${DANGER:+$DANGER
+}  $f (infrastructure/config/quality-gate)"
       ;;
   esac
 
@@ -73,13 +78,54 @@ for f in $STAGED; do
 done
 
 if [ -n "$DANGER" ]; then
-  echo ""
-  echo "vibe-safe: PAUSE -- Danger Zone files staged:"
-  echo "$DANGER"
-  echo ""
-  echo "These need developer review. Run: vibe-safe commit"
-  echo ""
-  exit 1
+  bail "PAUSE -- Danger Zone files staged:" "$DANGER" \
+    "These need developer review. Run: vibe-safe commit"
 fi
 
-echo "vibe-safe: branch, credentials, danger zones -- clear"
+# 4. Error suppression check
+SUPPRESS=$(echo "$ADDED" | grep -E "@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable" 2>/dev/null)
+if [ -n "$SUPPRESS" ]; then
+  bail "PAUSE -- Error suppression added:" "$SUPPRESS" \
+    "Claude may have hidden errors instead of fixing them. Run: vibe-safe commit"
+fi
+
+# 5. Test bypass check
+SKIPPED=$(echo "$ADDED" | grep -E "\.skip\(|[^a-z]xit\(|[^a-z]xdescribe\(|[^a-z]xtest\(" 2>/dev/null)
+if [ -n "$SKIPPED" ]; then
+  bail "PAUSE -- Tests bypassed:" "$SKIPPED" \
+    "Claude may have skipped failing tests instead of fixing them. Run: vibe-safe commit"
+fi
+
+# 6. Debug artifact check (excluding test files)
+DEBUG_FILES=$(echo "$STAGED_FILES" | grep -v -E "\.(test|spec)\." 2>/dev/null)
+if [ -n "$DEBUG_FILES" ]; then
+  DEBUG=$(echo "$ADDED" | grep -E "console\.(log|error|warn|debug)|debugger;" 2>/dev/null)
+  if [ -n "$DEBUG" ]; then
+    bail "PAUSE -- Debug output in non-test files:" "$DEBUG" \
+      "Remove before committing or run: vibe-safe commit"
+  fi
+fi
+
+# 7. Empty catch check
+EMPTY_CATCH=$(echo "$ADDED" | grep -E "catch\s*\(\w*\)\s*\{[[:space:]]*\}|catch\s*\{[[:space:]]*\}" 2>/dev/null)
+if [ -n "$EMPTY_CATCH" ]; then
+  bail "PAUSE -- Empty catch block added:" "$EMPTY_CATCH" \
+    "Errors silently swallowed. Run: vibe-safe commit"
+fi
+
+# 8. Lock file drift check
+LOCK_CHANGED=$(echo "$STAGED_FILES" | grep -E "package-lock\.json|yarn\.lock|pnpm-lock\.yaml" 2>/dev/null)
+PKG_CHANGED=$(echo "$STAGED_FILES" | grep "^package\.json$" 2>/dev/null)
+if [ -n "$LOCK_CHANGED" ] && [ -z "$PKG_CHANGED" ]; then
+  bail "PAUSE -- Lock file changed without package.json:" "$LOCK_CHANGED" \
+    "Manual lock file edits are almost always wrong. Run: vibe-safe commit"
+fi
+
+# 9. Binary file check
+BINARY=$(git diff --cached --numstat 2>/dev/null | awk '$1 == "-" && $2 == "-" {print "  " $3 " (binary)"}')
+if [ -n "$BINARY" ]; then
+  bail "PAUSE -- Binary files staged:" "$BINARY" \
+    "Binary files bloat git history permanently. Run: vibe-safe commit"
+fi
+
+echo "vibe-safe: branch, credentials, danger zones, suppression, tests, debug, lock, binaries -- clear"

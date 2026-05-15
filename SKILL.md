@@ -77,13 +77,25 @@ Claude runs:
 
 | Signal | Example flag |
 |--------|-------------|
-| Credential pattern | `src/api/client.ts:14 — const API_KEY = "sk-proj-abc123"` ⛔ This key is now in git history permanently, even if deleted later |
+| Credential pattern | `src/api/client.ts:14 — const API_KEY = "sk-proj-abc123"` ⛔ Permanent in git history even if deleted |
 | File deletion | `src/utils/helper.ts deleted` — Claude may be wrong that it's unused |
 | Config file modified | `config/nginx.conf` — controls production traffic for everyone |
 | Migration file present | `db/migrations/*.sql` — irreversible schema change |
 | Auth-related file | `src/auth/session.ts` — security surface, needs developer eyes |
 | Scope creep | Files modified that weren't in your original target |
-| Quality gate weakening | `jest.config.ts: coverage threshold dropped from 80 to 60` ⛔ Claude fixed the check, not the bug |
+| Quality gate weakening | `jest.config.ts: threshold 80 → 60` ⛔ Claude fixed the check, not the bug |
+| Error suppression | `src/api/client.ts:23 — // @ts-ignore` ⛔ Type error hidden, not fixed |
+| Linter suppression | `src/Form.tsx:7 — // eslint-disable-next-line` ⛔ Lint error hidden, not fixed |
+| Test bypass | `auth.test.ts:45 — it.skip("validates token"...)` ⛔ Failing test skipped, not fixed |
+| Test deletion | `tests/payment.test.ts deleted` ⛔ Entire test file removed to make suite pass |
+| Debug output | `src/Form.tsx:12 — console.log(userData)` ⛔ Logs production data, may expose PII |
+| Empty catch block | `src/api/client.ts:67 — catch (e) {}` ⛔ Errors silently swallowed |
+| Lock file drift | `package-lock.json changed, package.json unchanged` — undocumented dependency change |
+| New dependency | `package.json: "lodash" added` — check license, security, bundle size |
+| Binary/large file | `assets/video.mp4 staged` ⛔ Bloats git history permanently |
+| PII in diff | `seeds/users.ts:4 — email: "john.doe@acme.com"` ⛔ Real data committed |
+| Internal hostname | `config/api.ts:2 — baseURL: "http://api.internal:8080"` ⛔ Infrastructure exposed |
+| Force push proposed | Claude suggested `git push --force` → ALARM immediately |
 
 Every flag ends with a plain-English explanation of the worst-case consequence and a specific action.
 
@@ -111,6 +123,37 @@ Five automated checks, each with remediation:
 
 5. **Scope check** — staged file list vs. your stated intent
    - Out-of-scope file → Claude runs `git restore --staged <file>` after your confirmation
+
+**Code health checks** — Claude runs these on the staged diff (`git diff --cached`), scanning only added lines (`grep "^+"`):
+
+6. **Suppression scan** — `@ts-ignore`, `@ts-nocheck`, `eslint-disable`, `@ts-expect-error` added
+   - Found → flag with line; Claude does not auto-remove (may be intentional), but requires explanation before proceeding
+
+7. **Test bypass scan** — `.skip(`, `xit(`, `xdescribe(`, `x.test(` added
+   - Found → flag: "Claude bypassed a failing test instead of fixing it"
+
+8. **Debug artifact scan** — `console.log`, `console.error`, `console.warn`, `debugger` added
+   - Found in non-test file → flag: "Debug output left in production code"
+
+9. **Empty catch scan** — `catch\s*\(.*\)\s*\{\s*\}` or `catch\s*\{\s*\}` added
+   - Found → flag: "Errors silently swallowed — failures invisible in production"
+
+10. **Lock file drift** — `package-lock.json`/`yarn.lock`/`pnpm-lock.yaml` staged without `package.json`, or vice versa
+    - Found → flag: "Manual lock file edits are almost always wrong"
+
+11. **Binary/large file scan** — `git diff --cached --numstat` for lines showing `-	-	<filename>` (binary)
+    - Found → flag: "Binary files bloat git history permanently and cannot be removed cleanly"
+
+12. **PII scan** — added lines matching `[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}` (email) or `\+?[0-9]{10,}` (phone)
+    - Found → flag: "Real personal data in committed code — check if this is test fixture or real user data"
+
+13. **Internal hostname scan** — added lines matching `localhost:[0-9]+`, `192\.168\.`, `10\.[0-9]+\.`, `\.internal\b`, `\.corp\b`
+    - Found → flag: "Internal infrastructure URL committed — exposes network topology"
+
+14. **New dependency check** — `git diff --cached package.json` shows new entry in `dependencies` or `devDependencies`
+    - Found → surface: name, check if it's a known package, flag for license and security review
+
+15. **Force push guard** — if Claude ever proposes `git push --force` or `git push -f` at any point in the session: route immediately to ALARM mode
 
 **When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
@@ -156,6 +199,11 @@ Claude assesses three things:
 - **Expected review?** Would a developer expect to approve this first?
 
 Output: **GO AHEAD / PAUSE AND CHECK / STOP — CALL A DEVELOPER**
+
+**Auto-escalate to ALARM — no questions needed:**
+- Claude proposes `git push --force` or `git push -f` for any reason
+- Claude proposes running a direct database command (`psql`, `rails db:`, `knex migrate`)
+- Claude proposes modifying `.github/workflows/` to skip a failing check
 
 ---
 
@@ -214,6 +262,10 @@ Files that need developer involvement regardless of change size:
 | "It's just a config tweak" | Config files control production for everyone on the team |
 | "I've done this before" | Past safety was luck, not process |
 | "Claude made the failing checks pass" | Check what it changed to make them pass — lowering a threshold is not fixing a bug |
+| "It's just a ts-ignore, it'll be fine" | Suppressed errors accumulate into unfixable technical debt |
+| "I'll remove the console.log later" | Later doesn't happen; debug logs leak data in production |
+| "The test was probably out of date anyway" | Claude skipped it because it was failing, not because it was wrong |
+| "It's just push --force on my branch" | If anyone else pulled that branch, their work is gone |
 
 ---
 
