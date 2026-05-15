@@ -104,6 +104,8 @@ Claude runs:
 | Timing hack | `setTimeout`/`sleep`/`time.sleep` with hardcoded value — Claude papered over a race condition |
 | TypeScript type erasure | `: any` / `as any` added — Claude escaped the type system instead of fixing types |
 | Debug mode in config | `DEBUG = True` / `debug: true` in non-test config — debug mode left on |
+| TODO/FIXME stub | `throw new Error("TODO")` or `// TODO: implement` in new code — Claude left a placeholder |
+| Commented-out code | `// const user = await getUser(id)` — working code disabled, Claude may have been unsure |
 
 Every flag ends with a plain-English explanation of the worst-case consequence and a specific action.
 
@@ -186,6 +188,12 @@ Five automated checks, each with remediation:
 
 23. **Debug mode scan** — `DEBUG = True`, `debug: true`, `APP_ENV=development` added in non-test config files
     - Found → flag: "Debug mode in a non-test file — check this isn't heading to production"
+
+24. **TODO/FIXME stub scan** — `throw new Error("TODO")`, `raise NotImplementedError`, `// TODO`, `# FIXME` in implementation files (not `.md`, not test files)
+    - Found → flag: "Claude left a placeholder instead of implementing — this will fail at runtime"
+
+25. **Commented-out code scan** — added lines matching `// <code-keyword>` or `# <code-keyword>` where keyword is `const`, `let`, `var`, `function`, `return`, `import`, `export`, `if`, `for`, `while`, `class`, `def`, `async`
+    - Found → flag: "Claude commented out working code — may indicate uncertainty about the change"
 
 **When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
@@ -301,6 +309,8 @@ Files that need developer involvement regardless of change size:
 | "verify=False is just for testing" | It was in the diff — check if it's going to production |
 | "The any type is fine for now" | Type debt compounds; Claude added it to avoid fixing the real error |
 | "The sleep just makes it more reliable" | Timing hacks hide bugs and make tests slow and flaky |
+| "I'll implement that part later" | Claude shipped a placeholder — it will throw at runtime |
+| "That code was probably dead anyway" | Commented-out code means Claude wasn't sure — don't ship uncertainty |
 
 ---
 

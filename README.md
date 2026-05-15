@@ -1,6 +1,6 @@
 # vibe-safe
 
-**Covers 23 risk categories. Without this skill: 0 caught. With this skill: all caught.**
+**Covers 25 risk categories. Without this skill: 0 caught. With this skill: all caught.**
 
 A Claude Code skill that acts as an active session guardian for non-technical contributors — PMs, designers, researchers — shipping AI-assisted code in shared codebases.
 
@@ -35,6 +35,8 @@ The difference from a checklist: **Claude reads your actual git state and scans 
 | `setTimeout`/`sleep` with hardcoded value | No check | Flagged — timing hack, not a real fix |
 | `: any` / `as any` proliferation (TypeScript) | No check | Flagged — type system escaped |
 | `debug: true` in non-test config | No check | Flagged — debug mode in production |
+| `throw new Error("TODO")` / `// TODO` in implementation | No check | Flagged — placeholder shipped instead of real code |
+| Commented-out code blocks | No check | Flagged — Claude disabled working code, possibly uncertain |
 
 ---
 
@@ -63,6 +65,15 @@ Claude proposed something that feels big → ALARM mode
 Or invoke directly: `vibe-safe commit` / `vibe-safe before` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
+
+---
+
+## v1.4.0: 2 more risk categories — covers 25 total
+
+- **TODO/FIXME stubs** — `throw new Error("TODO")`, `raise NotImplementedError`, `// TODO` in implementation files. Claude left a placeholder that will throw at runtime.
+- **Commented-out code** — lines where Claude disabled working code (`// const user = ...`). Signals uncertainty — shouldn't ship.
+
+Both checks in the pre-commit hook (18 checks total).
 
 ---
 

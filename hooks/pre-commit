@@ -182,4 +182,21 @@ if [ -n "$NON_TEST_FILES" ]; then
   fi
 fi
 
-echo "vibe-safe: all 16 checks passed -- clear"
+# 17. TODO/FIXME stub check (implementation files only, not .md or test files)
+IMPL_FILES=$(echo "$STAGED_FILES" | grep -v -E "\.(md|txt)$|\.(test|spec)\.|__tests__" 2>/dev/null)
+if [ -n "$IMPL_FILES" ]; then
+  TODO_STUB=$(echo "$ADDED" | grep -iE "(throw|raise).*(todo|not.?implemented|NotImplementedError)|//\s*TODO[^:]*:|#\s*FIXME[^:]*:" 2>/dev/null)
+  if [ -n "$TODO_STUB" ]; then
+    bail "PAUSE -- TODO/FIXME stub in implementation code:" "$TODO_STUB" \
+      "Claude left a placeholder instead of implementing. This will fail at runtime."
+  fi
+fi
+
+# 18. Commented-out code check
+COMMENTED=$(echo "$ADDED" | grep -E "^\+\s*(//|#)\s*(const |let |var |function |return |import |export |if |for |while |class |def |async )" 2>/dev/null)
+if [ -n "$COMMENTED" ]; then
+  bail "PAUSE -- Commented-out code added:" "$COMMENTED" \
+    "Claude may have been unsure — disabled code should not ship. Run: vibe-safe commit"
+fi
+
+echo "vibe-safe: all 18 checks passed -- clear"
