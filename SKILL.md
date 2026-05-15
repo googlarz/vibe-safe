@@ -106,6 +106,9 @@ Claude runs:
 | Debug mode in config | `DEBUG = True` / `debug: true` in non-test config — debug mode left on |
 | TODO/FIXME stub | `throw new Error("TODO")` or `// TODO: implement` in new code — Claude left a placeholder |
 | Commented-out code | `// const user = await getUser(id)` — working code disabled, Claude may have been unsure |
+| Private key file staged | `server.pem`, `id_rsa`, `client.p12` staged ⛔ Binary credential — not caught by text grep |
+| `rm -rf` in script | `rm -rf $DIR/*` in committed shell script ⛔ Aggressive cleanup Claude wrote without knowing prod paths |
+| String thrown, not Error | `throw "something failed"` — loses stack trace, bugs become undiagnosable in production |
 
 Every flag ends with a plain-English explanation of the worst-case consequence and a specific action.
 
@@ -194,6 +197,15 @@ Five automated checks, each with remediation:
 
 25. **Commented-out code scan** — added lines matching `// <code-keyword>` or `# <code-keyword>` where keyword is `const`, `let`, `var`, `function`, `return`, `import`, `export`, `if`, `for`, `while`, `class`, `def`, `async`
     - Found → flag: "Claude commented out working code — may indicate uncertainty about the change"
+
+26. **Private key file scan** — `git diff --cached --name-only` for `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.jks`, `id_rsa`, `id_ed25519`, `*.crt`, `*.cer`
+    - Found → **STOP**: "Binary credential file staged — not caught by text grep. Private keys in git history are compromised permanently."
+
+27. **Destructive command scan** — `rm -rf` in staged `.sh`, `Makefile`, `.github/workflows/`, or any script file
+    - Found → flag: "Claude wrote an aggressive delete command — verify the path is not production data before committing"
+
+28. **String throw scan** — `throw "` or `throw '` (not `throw new`) in JavaScript/TypeScript files
+    - Found → flag: "String thrown instead of Error object — stack trace is lost, this bug will be undiagnosable in production"
 
 **When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
@@ -311,6 +323,8 @@ Files that need developer involvement regardless of change size:
 | "The sleep just makes it more reliable" | Timing hacks hide bugs and make tests slow and flaky |
 | "I'll implement that part later" | Claude shipped a placeholder — it will throw at runtime |
 | "That code was probably dead anyway" | Commented-out code means Claude wasn't sure — don't ship uncertainty |
+| "The rm -rf is scoped to a temp dir" | Verify that before it runs in CI against a production path |
+| "throw is throw, same thing" | String throws lose the stack trace — production bugs become invisible |
 
 ---
 

@@ -199,4 +199,31 @@ if [ -n "$COMMENTED" ]; then
     "Claude may have been unsure — disabled code should not ship. Run: vibe-safe commit"
 fi
 
-echo "vibe-safe: all 18 checks passed -- clear"
+# 19. Private key file check
+KEY_EXT=$(echo "$STAGED_FILES" | grep -iE "\.(pem|key|pfx|p12|jks|crt|cer)$|^(id_rsa|id_ed25519|id_dsa|id_ecdsa)$" 2>/dev/null)
+if [ -n "$KEY_EXT" ]; then
+  bail "STOP -- Private key or certificate file staged:" "$KEY_EXT" \
+    "Binary credentials are not caught by text grep. Keys in git history are permanently compromised."
+fi
+
+# 20. Destructive rm -rf in scripts
+SCRIPT_FILES=$(echo "$STAGED_FILES" | grep -E "\.(sh|bash|zsh|fish|mk|Makefile)$|Makefile|\.github/workflows/" 2>/dev/null)
+if [ -n "$SCRIPT_FILES" ]; then
+  RMRF=$(echo "$ADDED" | grep -E "rm\s+-rf?\s+" 2>/dev/null)
+  if [ -n "$RMRF" ]; then
+    bail "PAUSE -- rm -rf in committed script:" "$RMRF" \
+      "Verify this path is never a production directory before committing."
+  fi
+fi
+
+# 21. String throw (no Error object) in JS/TS
+JS_FILES=$(echo "$STAGED_FILES" | grep -E "\.(js|ts|jsx|tsx|mjs|cjs)$" 2>/dev/null)
+if [ -n "$JS_FILES" ]; then
+  STRING_THROW=$(echo "$ADDED" | grep -E "throw\s+['\"]" 2>/dev/null)
+  if [ -n "$STRING_THROW" ]; then
+    bail "PAUSE -- String thrown instead of Error object:" "$STRING_THROW" \
+      "Stack trace is lost. Production bugs become undiagnosable. Use: throw new Error(\"message\")"
+  fi
+fi
+
+echo "vibe-safe: all 21 checks passed -- clear"

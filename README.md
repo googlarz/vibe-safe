@@ -1,6 +1,6 @@
 # vibe-safe
 
-**Covers 25 risk categories. Without this skill: 0 caught. With this skill: all caught.**
+**Covers 28 risk categories. Without this skill: 0 caught. With this skill: all caught.**
 
 A Claude Code skill that acts as an active session guardian for non-technical contributors — PMs, designers, researchers — shipping AI-assisted code in shared codebases.
 
@@ -37,6 +37,9 @@ The difference from a checklist: **Claude reads your actual git state and scans 
 | `debug: true` in non-test config | No check | Flagged — debug mode in production |
 | `throw new Error("TODO")` / `// TODO` in implementation | No check | Flagged — placeholder shipped instead of real code |
 | Commented-out code blocks | No check | Flagged — Claude disabled working code, possibly uncertain |
+| Private key / cert file staged | No check | STOP — binary credential, text grep misses it |
+| `rm -rf` in committed script | No check | Flagged — destructive path Claude wrote without knowing prod layout |
+| `throw "string"` without Error | No check | Flagged — stack trace lost, bugs undiagnosable in production |
 
 ---
 
@@ -65,6 +68,16 @@ Claude proposed something that feels big → ALARM mode
 Or invoke directly: `vibe-safe commit` / `vibe-safe before` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
+
+---
+
+## v1.5.0: final 3 risk categories — covers 28 total
+
+- **Private key / cert files staged** — `.pem`, `.key`, `.pfx`, `.p12`, `.jks`, `id_rsa`, `id_ed25519`. Binary credentials the text grep misses entirely. STOP-level.
+- **`rm -rf` in committed scripts** — Claude writes aggressive cleanup without knowing prod paths. Flagged in `.sh`, `Makefile`, CI configs.
+- **`throw "string"` without Error** — loses the stack trace. Production bugs become permanently undiagnosable.
+
+Pre-commit hook: 21 checks total. **This is the complete surface** — beyond here, you need a real SAST tool.
 
 ---
 
