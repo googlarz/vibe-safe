@@ -28,16 +28,40 @@ Or invoke directly: `vibe-safe before / review / commit / pr / conflict / alarm`
 
 ---
 
+## Repo Configuration: `.vibesafe`
+
+If a `.vibesafe` file exists in the repo root, all modes read it alongside the default Danger Zone list. Format:
+
+```
+# .vibesafe
+danger_zone: src/payments/
+danger_zone: infrastructure/
+safe_zone: src/components/marketing/
+safe_zone: public/images/
+```
+
+BEFORE mode generates this file. Once committed, every contributor gets the same custom rules automatically.
+
+---
+
 ## Mode: BEFORE
 
 Before Claude writes anything. Run this before you describe your task.
 
 Claude runs:
-- `git branch --show-current` — if main/master: **STOP immediately**
+- `git branch --show-current` — if main/master: **STOP and fix immediately**: Claude runs `git checkout -b feature/[3-word-description-from-task]`
 - `git log --follow -- <your target files>` — establishes who owns this area
-- File extension check against Danger Zones (see below)
+- File extension check against Danger Zones + `.vibesafe` custom zones
+- `ls .git/hooks/pre-commit` — checks whether the mechanical safety hook is installed
 
-Output includes a scoped prompt to give Claude that limits what files it's allowed to touch. Use it verbatim.
+**Output:**
+
+1. **Scoped prompt** — limits what files Claude is allowed to touch. Use it verbatim.
+2. **Hook installation** — if no pre-commit hook exists, Claude copies `~/.claude/skills/vibe-safe/hooks/pre-commit` to `.git/hooks/pre-commit` and makes it executable. This hook runs branch + credential + Danger Zone checks on every future `git commit`, without requiring you to remember vibe-safe.
+3. **`.vibesafe` generation** — if no `.vibesafe` exists, Claude asks:
+   - "What parts of this codebase should a developer always be consulted on?"
+   - "What areas are definitely yours to edit freely (copy, images, marketing)?"
+   Then writes the file and shows you what to commit.
 
 ---
 
@@ -66,19 +90,27 @@ Every flag ends with a plain-English explanation of the worst-case consequence a
 
 ## Mode: COMMIT
 
-Before `git commit`.
+Before `git commit`. For fixable problems, Claude executes the fix — you don't need to know the git commands.
 
-Five automated checks — Claude runs each:
+Five automated checks, each with remediation:
 
-1. `git grep -nE "sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="` on ALL tracked files (not just staged — credentials in any file are your problem)
-2. File type audit: are any staged files in the Danger Zone list?
-3. Deletion audit: any files being removed?
-4. Branch: `git branch --show-current` (STOP if main/master)
-5. Scope: staged file list vs. your stated intent
+1. **Credential scan** — `git grep -nE "sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="` on ALL tracked files
+   - Staged file contains credential → Claude runs `git restore --staged <file>`, explains the key must be rotated even after removal
+   - Untracked file contains credential → flag only (Claude cannot unstage what isn't staged)
 
-Output: **SAFE TO COMMIT** or **STOP** with specific reason.
+2. **Danger Zone audit** — staged files vs. default list + `.vibesafe` custom zones
+   - Danger Zone file staged → Claude runs `git restore --staged <file>` and tells you what to ask a developer to apply instead
 
-If safe: Claude generates the commit message from the diff + your one-line description of what you did.
+3. **Deletion audit** — any files being removed?
+   - File deleted → flag: "Claude may be wrong that this is unused. Confirm with a developer before this commit."
+
+4. **Branch check** — `git branch --show-current`
+   - On main/master → Claude runs `git checkout -b feature/[3-word-slug-from-diff]`, then re-runs all checks on the new branch
+
+5. **Scope check** — staged file list vs. your stated intent
+   - Out-of-scope file → Claude runs `git restore --staged <file>` after your confirmation
+
+**When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
 ---
 

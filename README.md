@@ -22,9 +22,6 @@ The difference from a checklist: **Claude reads your actual git state and scans 
 ## Install
 
 ```bash
-# Via agentskills.io (recommended)
-claude mcp run agentskills install vibe-safe
-
 # Manual
 git clone https://github.com/googlarz/vibe-safe ~/.claude/skills/vibe-safe
 ```
@@ -50,23 +47,58 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 
 ---
 
+## v1.1: Three new capabilities
+
+### 1. Pre-commit hook — safety without memory
+
+BEFORE mode now installs `hooks/pre-commit` into `.git/hooks/pre-commit` automatically. From that point, every `git commit` in that repo runs the mechanical checks (branch, credentials, Danger Zones) without you needing to think about it. Works without Claude — pure shell.
+
+```bash
+# Or install manually:
+cp ~/.claude/skills/vibe-safe/hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+### 2. Agentic remediation — fix, don't just flag
+
+COMMIT mode no longer just flags problems — it executes the fix for anything fixable:
+
+| Problem | What Claude does |
+|---------|-----------------|
+| On `main`/`master` | `git checkout -b feature/[3-word-slug]`, then re-runs checks |
+| Credential in staged file | `git restore --staged <file>`, explains key must be rotated |
+| Danger Zone file staged | `git restore --staged <file>`, tells you what to ask a dev to apply |
+| Out-of-scope file staged | `git restore --staged <file>` after your confirmation |
+| All checks pass | Generates commit message, runs `git commit -m "..."` for you |
+
+You confirm or edit — you don't need to know the git commands.
+
+### 3. Repo-specific `.vibesafe` config
+
+BEFORE mode generates a `.vibesafe` file for your repo. Once committed, every contributor (and the pre-commit hook) uses the same custom rules.
+
+```
+# .vibesafe
+danger_zone: src/payments/
+danger_zone: infrastructure/
+safe_zone: src/components/marketing/
+safe_zone: public/images/
+```
+
+BEFORE mode asks two questions to generate it: what's off-limits, and what's definitely yours to change.
+
+---
+
 ## Modes
 
 ### BEFORE
-Runs before Claude writes anything. Checks your branch (STOP if main/master), traces who owns the target files via git log, and generates a scoped prompt that limits what files Claude is allowed to touch.
+Runs before Claude writes anything. Checks your branch (creates a feature branch if on main), traces who owns the target files via git log, installs the pre-commit hook if missing, generates `.vibesafe` if missing, and produces a scoped prompt that limits what files Claude is allowed to touch.
 
 ### REVIEW
 After Claude writes code, before you commit. Runs `git diff HEAD` for unstaged changes **and** `git grep` across all tracked files for credential patterns. Credentials live in files you didn't intend to change and won't appear in your diff.
 
 ### COMMIT
-Five automated checks before `git commit`:
-1. Full-repo credential grep (not just staged files)
-2. File type audit against Danger Zones
-3. Deletion audit
-4. Branch check (STOP if main/master)
-5. Scope check against your stated intent
-
-Output: **SAFE TO COMMIT** or **STOP** with specific file:line evidence. If safe, Claude generates the commit message.
+Five automated checks, each with remediation (see above). When all pass: Claude generates the commit message and runs `git commit` for you.
 
 ### PR
 Reads `git diff main...HEAD`, asks why you're making the change, generates a complete PR description with what changed, what to test, flagged uncertainties, and suggested reviewers from git log.

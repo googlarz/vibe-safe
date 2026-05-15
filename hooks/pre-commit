@@ -1,0 +1,80 @@
+#!/bin/sh
+# vibe-safe pre-commit hook
+# Runs mechanical safety checks on every commit — no Claude required.
+# Install: cp ~/.claude/skills/vibe-safe/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+CRED_PATTERN="sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="
+
+# 1. Branch check
+BRANCH=$(git branch --show-current 2>/dev/null)
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  echo ""
+  echo "vibe-safe: STOP -- committing directly to $BRANCH."
+  echo "Create a branch: git checkout -b feature/your-change-name"
+  echo ""
+  exit 1
+fi
+
+# 2. Credential scan across ALL tracked files (not just staged)
+CREDS=$(git grep -nE "$CRED_PATTERN" 2>/dev/null)
+if [ -n "$CREDS" ]; then
+  echo ""
+  echo "vibe-safe: STOP -- credential pattern found in tracked files:"
+  echo "$CREDS"
+  echo ""
+  echo "Credentials in git history are permanent even after deletion."
+  echo "Run: vibe-safe commit"
+  echo ""
+  exit 1
+fi
+
+# 3. Danger zone check on staged files
+STAGED=$(git diff --cached --name-only 2>/dev/null)
+DANGER=""
+
+for f in $STAGED; do
+  case "$f" in
+    .env|.env.*|*.conf|Dockerfile|docker-compose*|\
+    .github/workflows/*|Jenkinsfile|.circleci/*|.gitlab-ci.yml|\
+    */migrations/*|*/schema/*|*.sql|\
+    webpack.config.*|vite.config.*|tsconfig.json|\
+    package.json|Gemfile|requirements.txt)
+      DANGER="  $f (infrastructure/config/deps)"
+      ;;
+  esac
+
+  BASENAME=$(basename "$f" | tr '[:upper:]' '[:lower:]')
+  case "$BASENAME" in
+    *auth*|*login*|*session*|*jwt*|*oauth*|*permission*|*role*)
+      DANGER="${DANGER:+$DANGER
+}  $f (auth/security)"
+      ;;
+  esac
+
+  # .vibesafe custom danger zones
+  if [ -f ".vibesafe" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        danger_zone:*)
+          ZONE=$(echo "$line" | sed 's/^danger_zone:[[:space:]]*//')
+          case "$f" in
+            ${ZONE}*) DANGER="${DANGER:+$DANGER
+}  $f (custom zone: $ZONE)" ;;
+          esac
+          ;;
+      esac
+    done < .vibesafe
+  fi
+done
+
+if [ -n "$DANGER" ]; then
+  echo ""
+  echo "vibe-safe: PAUSE -- Danger Zone files staged:"
+  echo "$DANGER"
+  echo ""
+  echo "These need developer review. Run: vibe-safe commit"
+  echo ""
+  exit 1
+fi
+
+echo "vibe-safe: branch, credentials, danger zones -- clear"
