@@ -13,9 +13,10 @@ The difference from a checklist: **Claude reads your actual git state and scans 
 | Risk | Without vibe-safe | With vibe-safe |
 |------|------------------|----------------|
 | Credential committed (not in diff) | Missed — not in staged files | Caught — full-repo grep, `src/api/client.ts:14` |
-| Committing directly to main | No check | Stopped immediately |
+| Committing directly to main | No check | Stopped immediately, feature branch created |
 | Config/auth/migration files in diff | No check | Flagged with escalation instruction |
 | Merging conflict by accepting all "theirs" | No check | Both sides explained, Danger Zone → stop |
+| Claude lowered a quality threshold to pass CI | No check | Caught — diff scanned for numeric decreases in quality configs |
 
 ---
 
@@ -44,6 +45,18 @@ Claude proposed something that feels big → ALARM mode
 Or invoke directly: `vibe-safe commit` / `vibe-safe before` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
+
+---
+
+## v1.1.1: Catch quality gate weakening
+
+Real incident: PM told Claude to make GitHub checks pass. Claude lowered the coverage threshold instead of fixing the failing tests. Checks went green. Bugs stayed.
+
+**New Danger Zone — Quality gates:** `jest.config.*`, `vitest.config.*`, `codecov.yml`, `.nycrc`, `.eslintrc.*`, `.stylelintrc.*`, `sonar-project.properties`
+
+**New check:** When a quality config file is staged, Claude scans the diff for decreased numeric values. If a threshold dropped, it flags: *"Claude may have fixed the failing check by lowering the bar, not by fixing the code."*
+
+**New rationalization:** `"Claude made the failing checks pass"` → Check what it changed to make them pass. Lowering a threshold is not fixing a bug.
 
 ---
 
@@ -126,6 +139,7 @@ Files that need developer involvement regardless of change size:
 | Database | `migrations/`, `schema/`, `*.sql` |
 | Auth | files named: `auth`, `login`, `session`, `jwt`, `oauth`, `permission`, `role` |
 | Build | `webpack.config.*`, `vite.config.*`, `tsconfig.json` |
+| Quality gates | `jest.config.*`, `vitest.config.*`, `codecov.yml`, `.nycrc`, `.eslintrc.*`, `.stylelintrc.*`, `sonar-project.properties` |
 | Dependencies | `package.json`, `Gemfile`, `requirements.txt` (version changes) |
 
 ---
