@@ -1,6 +1,6 @@
 # vibe-safe
 
-**Without this skill: 0/4 risks caught. With this skill: 4/4 caught.**
+**Without this skill: 0/5 risks caught. With this skill: 5/5 caught.**
 
 A Claude Code skill that acts as an active session guardian for non-technical contributors — PMs, designers, researchers — shipping AI-assisted code in shared codebases.
 
