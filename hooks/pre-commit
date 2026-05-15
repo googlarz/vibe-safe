@@ -38,8 +38,9 @@ for f in $STAGED; do
     .github/workflows/*|Jenkinsfile|.circleci/*|.gitlab-ci.yml|\
     */migrations/*|*/schema/*|*.sql|\
     webpack.config.*|vite.config.*|tsconfig.json|\
+    jest.config.*|vitest.config.*|codecov.yml|.nycrc|sonar-project.properties|\
     package.json|Gemfile|requirements.txt)
-      DANGER="  $f (infrastructure/config/deps)"
+      DANGER="  $f (infrastructure/config/deps/quality-gate)"
       ;;
   esac
 
@@ -48,6 +49,10 @@ for f in $STAGED; do
     *auth*|*login*|*session*|*jwt*|*oauth*|*permission*|*role*)
       DANGER="${DANGER:+$DANGER
 }  $f (auth/security)"
+      ;;
+    .eslintrc*|.stylelintrc*)
+      DANGER="${DANGER:+$DANGER
+}  $f (quality-gate)"
       ;;
   esac
 

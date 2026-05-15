@@ -83,6 +83,7 @@ Claude runs:
 | Migration file present | `db/migrations/*.sql` — irreversible schema change |
 | Auth-related file | `src/auth/session.ts` — security surface, needs developer eyes |
 | Scope creep | Files modified that weren't in your original target |
+| Quality gate weakening | `jest.config.ts: coverage threshold dropped from 80 to 60` ⛔ Claude fixed the check, not the bug |
 
 Every flag ends with a plain-English explanation of the worst-case consequence and a specific action.
 
@@ -100,6 +101,7 @@ Five automated checks, each with remediation:
 
 2. **Danger Zone audit** — staged files vs. default list + `.vibesafe` custom zones
    - Danger Zone file staged → Claude runs `git restore --staged <file>` and tells you what to ask a developer to apply instead
+   - Quality gate file staged → Claude reads the diff and checks whether any numeric threshold decreased: `git diff --cached <file> | grep -E "^\-.*[0-9]"`. If a number dropped (coverage %, error limit, score floor), flag as **quality gate weakening**: "Claude may have fixed the failing check by lowering the bar, not by fixing the code."
 
 3. **Deletion audit** — any files being removed?
    - File deleted → flag: "Claude may be wrong that this is unused. Confirm with a developer before this commit."
@@ -194,6 +196,7 @@ Files that need developer involvement regardless of change size:
 | Database | `migrations/`, `schema/`, `*.sql` |
 | Auth | files named: `auth`, `login`, `session`, `jwt`, `oauth`, `permission`, `role` |
 | Build | `webpack.config.*`, `vite.config.*`, `tsconfig.json` |
+| Quality gates | `jest.config.*`, `vitest.config.*`, `codecov.yml`, `.nycrc`, `.eslintrc.*`, `.stylelintrc.*`, `sonar-project.properties` |
 | Dependencies | `package.json`, `Gemfile`, `requirements.txt` (version changes) |
 
 ---
@@ -210,6 +213,7 @@ Files that need developer involvement regardless of change size:
 | "The tests still pass" | Tests don't cover what they don't test |
 | "It's just a config tweak" | Config files control production for everyone on the team |
 | "I've done this before" | Past safety was luck, not process |
+| "Claude made the failing checks pass" | Check what it changed to make them pass — lowering a threshold is not fixing a bug |
 
 ---
 
