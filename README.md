@@ -1,12 +1,10 @@
 # vibe-safe
 
-**For non-technical contributors:** You didn't ask to become a software engineer. You just needed the button to say "Submit" instead of "Send." Claude wrote the code, it looked fine, and now there's a non-zero chance you're about to commit an API key directly to main with a commit message that says "update stuff." This catches that. Run it before you touch anything — Claude reads your actual git state and tells you exactly what to do next. You don't need to understand what any of it means.
+**For the non-technical contributor:** Claude wrote the code. You read the first two lines, it looked fine. The commit message says "update." You accepted "theirs" on all the merge conflicts. The test suite is green because Claude lowered the coverage threshold, not because the tests pass. The API key is in a file you never opened — it won't appear in your diff.
 
-**Your developer will still love you. Probably.**
+Run this before you commit. It reads your actual git state, not what you assume is in it.
 
-**For developers:** Your PM is going to vibe-code into the codebase. This is not a hypothesis, it's already happening. Install this on their machine before your next vacation — 28 automated checks run on every `git commit` without Claude, without you, and without anyone having to remember anything. Credentials, main-branch commits, suppressed errors, skipped tests, SSL disabled, quality thresholds quietly lowered so CI goes green. All of it.
-
-**You're welcome.**
+**For the developer:** Everything above has already happened in your repo. Install this before it happens again.
 
 ---
 
