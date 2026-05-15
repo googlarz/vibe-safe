@@ -96,6 +96,14 @@ Claude runs:
 | PII in diff | `seeds/users.ts:4 — email: "john.doe@acme.com"` ⛔ Real data committed |
 | Internal hostname | `config/api.ts:2 — baseURL: "http://api.internal:8080"` ⛔ Infrastructure exposed |
 | Force push proposed | Claude suggested `git push --force` → ALARM immediately |
+| XSS sink added | `dangerouslySetInnerHTML` added — direct XSS attack surface |
+| Code injection | `eval(` added — arbitrary code execution risk |
+| SSL disabled | `verify=False` / `NODE_TLS_REJECT_UNAUTHORIZED=0` / `rejectUnauthorized: false` — Claude "fixed" a cert error by disabling verification |
+| CORS wildcard | `origin: '*'` / `Access-Control-Allow-Origin: *` — API open to any domain |
+| `.gitignore` entries removed | Previously ignored files (possibly secrets) now tracked and will be committed |
+| Timing hack | `setTimeout`/`sleep`/`time.sleep` with hardcoded value — Claude papered over a race condition |
+| TypeScript type erasure | `: any` / `as any` added — Claude escaped the type system instead of fixing types |
+| Debug mode in config | `DEBUG = True` / `debug: true` in non-test config — debug mode left on |
 
 Every flag ends with a plain-English explanation of the worst-case consequence and a specific action.
 
@@ -154,6 +162,30 @@ Five automated checks, each with remediation:
     - Found → surface: name, check if it's a known package, flag for license and security review
 
 15. **Force push guard** — if Claude ever proposes `git push --force` or `git push -f` at any point in the session: route immediately to ALARM mode
+
+16. **XSS sink scan** — `dangerouslySetInnerHTML`, `innerHTML =`, `document.write(` added
+    - Found → flag: "Direct XSS attack surface — any user-controlled input reaching this is a vulnerability"
+
+17. **Code injection scan** — `eval(` added (JS/Python/Ruby)
+    - Found → flag: "Arbitrary code execution risk — almost never the right solution"
+
+18. **SSL bypass scan** — `verify=False`, `NODE_TLS_REJECT_UNAUTHORIZED`, `rejectUnauthorized: false`, `ssl_verify: false` added
+    - Found → flag: "Claude disabled certificate verification to fix a cert error — this silently removes all TLS protection"
+
+19. **CORS wildcard scan** — `origin: '*'`, `Access-Control-Allow-Origin: *`, `cors({ origin: true })` added
+    - Found → flag: "API now accepts requests from any domain — check if this is intentional"
+
+20. **`.gitignore` regression scan** — `git diff --cached .gitignore | grep "^-"` for removed entries
+    - Lines removed → flag: "Previously ignored files are now tracked — if any are secrets, they'll be committed on the next add"
+
+21. **Timing hack scan** — `setTimeout(`, `sleep(`, `time.sleep(`, `asyncio.sleep(` with a hardcoded numeric argument added
+    - Found → flag: "Hardcoded delay — Claude may have papered over a race condition rather than fixing the root cause"
+
+22. **Type erasure scan** — `: any` or `as any` added (TypeScript files only)
+    - More than 2 occurrences in one diff → flag: "Claude may have escaped the type system to avoid fixing type errors"
+
+23. **Debug mode scan** — `DEBUG = True`, `debug: true`, `APP_ENV=development` added in non-test config files
+    - Found → flag: "Debug mode in a non-test file — check this isn't heading to production"
 
 **When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
@@ -266,6 +298,9 @@ Files that need developer involvement regardless of change size:
 | "I'll remove the console.log later" | Later doesn't happen; debug logs leak data in production |
 | "The test was probably out of date anyway" | Claude skipped it because it was failing, not because it was wrong |
 | "It's just push --force on my branch" | If anyone else pulled that branch, their work is gone |
+| "verify=False is just for testing" | It was in the diff — check if it's going to production |
+| "The any type is fine for now" | Type debt compounds; Claude added it to avoid fixing the real error |
+| "The sleep just makes it more reliable" | Timing hacks hide bugs and make tests slow and flaky |
 
 ---
 

@@ -1,6 +1,6 @@
 # vibe-safe
 
-**Covers 15 risk categories. Without this skill: 0 caught. With this skill: all caught.**
+**Covers 23 risk categories. Without this skill: 0 caught. With this skill: all caught.**
 
 A Claude Code skill that acts as an active session guardian for non-technical contributors — PMs, designers, researchers — shipping AI-assisted code in shared codebases.
 
@@ -27,6 +27,14 @@ The difference from a checklist: **Claude reads your actual git state and scans 
 | PII in committed code | No check | Flagged — email/phone pattern on added lines |
 | Internal hostname committed | No check | Flagged — infrastructure topology exposed |
 | Claude proposes `git push --force` | No check | Auto-escalates to ALARM |
+| `dangerouslySetInnerHTML` / `innerHTML =` added | No check | Flagged — XSS attack surface |
+| `eval(` added | No check | Flagged — arbitrary code execution risk |
+| SSL verification disabled | No check | Flagged — TLS silently removed |
+| CORS wildcard set | No check | Flagged — API open to any domain |
+| `.gitignore` entries removed | No check | Flagged — previously ignored files now tracked |
+| `setTimeout`/`sleep` with hardcoded value | No check | Flagged — timing hack, not a real fix |
+| `: any` / `as any` proliferation (TypeScript) | No check | Flagged — type system escaped |
+| `debug: true` in non-test config | No check | Flagged — debug mode in production |
 
 ---
 
@@ -55,6 +63,26 @@ Claude proposed something that feels big → ALARM mode
 Or invoke directly: `vibe-safe commit` / `vibe-safe before` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
+
+---
+
+## v1.3.0: 8 more risk categories — covers 23 total
+
+**Security holes Claude introduces:**
+- `dangerouslySetInnerHTML`, `innerHTML =`, `document.write(` — XSS sinks
+- `eval(` — code injection
+- `verify=False`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false` — SSL disabled
+- CORS wildcard (`origin: '*'`) — API open to any domain
+
+**Git hygiene:**
+- `.gitignore` entries removed — previously ignored files (possibly secrets) now tracked
+
+**Shortcuts Claude takes under pressure:**
+- `setTimeout`/`sleep` with hardcoded numbers — timing hack, not a real fix
+- `: any` / `as any` in TypeScript — type system escaped instead of fixed
+- `debug: true` in non-test config — debug mode accidentally left on
+
+All checks in the pre-commit hook. SSL bypass escalates to STOP (not PAUSE).
 
 ---
 

@@ -128,4 +128,58 @@ if [ -n "$BINARY" ]; then
     "Binary files bloat git history permanently. Run: vibe-safe commit"
 fi
 
-echo "vibe-safe: branch, credentials, danger zones, suppression, tests, debug, lock, binaries -- clear"
+# 10. XSS sink check
+XSS=$(echo "$ADDED" | grep -E "dangerouslySetInnerHTML|innerHTML\s*=|document\.write\(" 2>/dev/null)
+if [ -n "$XSS" ]; then
+  bail "PAUSE -- XSS sink added:" "$XSS" \
+    "Any user input reaching this is a vulnerability. Run: vibe-safe commit"
+fi
+
+# 11. Code injection check
+EVAL=$(echo "$ADDED" | grep -E "\beval\(" 2>/dev/null)
+if [ -n "$EVAL" ]; then
+  bail "PAUSE -- eval() added:" "$EVAL" \
+    "Arbitrary code execution risk. Run: vibe-safe commit"
+fi
+
+# 12. SSL bypass check
+SSL=$(echo "$ADDED" | grep -E "verify=False|NODE_TLS_REJECT_UNAUTHORIZED|rejectUnauthorized:\s*false|ssl_verify:\s*false" 2>/dev/null)
+if [ -n "$SSL" ]; then
+  bail "STOP -- SSL verification disabled:" "$SSL" \
+    "Claude may have silenced a cert error by removing all TLS protection. Run: vibe-safe commit"
+fi
+
+# 13. CORS wildcard check
+CORS=$(echo "$ADDED" | grep -E "origin:\s*['\"]?\*['\"]?|Access-Control-Allow-Origin:\s*\*" 2>/dev/null)
+if [ -n "$CORS" ]; then
+  bail "PAUSE -- CORS wildcard added:" "$CORS" \
+    "API now accepts requests from any domain. Run: vibe-safe commit"
+fi
+
+# 14. .gitignore regression check
+if echo "$STAGED_FILES" | grep -q "^\.gitignore$"; then
+  REMOVED=$(echo "$STAGED_DIFF" | grep "^\-.gitignore" | grep -v "^---" 2>/dev/null)
+  if [ -n "$REMOVED" ]; then
+    bail "PAUSE -- .gitignore entries removed:" "$REMOVED" \
+      "Previously ignored files are now tracked and may be committed. Run: vibe-safe commit"
+  fi
+fi
+
+# 15. Timing hack check
+TIMING=$(echo "$ADDED" | grep -E "setTimeout\s*\([^,]+,\s*[0-9]+|sleep\s*\([0-9]|time\.sleep\s*\([0-9]|asyncio\.sleep\s*\([0-9]" 2>/dev/null)
+if [ -n "$TIMING" ]; then
+  bail "PAUSE -- Hardcoded timing delay added:" "$TIMING" \
+    "Claude may have papered over a race condition. Run: vibe-safe commit"
+fi
+
+# 16. Debug mode check (non-test files only)
+NON_TEST_FILES=$(echo "$STAGED_FILES" | grep -v -E "\.(test|spec)\.|__tests__" 2>/dev/null)
+if [ -n "$NON_TEST_FILES" ]; then
+  DEBUG_MODE=$(echo "$ADDED" | grep -E "DEBUG\s*=\s*True|debug:\s*true|APP_ENV\s*=\s*['\"]?development" 2>/dev/null)
+  if [ -n "$DEBUG_MODE" ]; then
+    bail "PAUSE -- Debug mode in non-test file:" "$DEBUG_MODE" \
+      "Check this isn't heading to production. Run: vibe-safe commit"
+  fi
+fi
+
+echo "vibe-safe: all 16 checks passed -- clear"
