@@ -1,10 +1,30 @@
 # vibe-safe
 
-**Covers 28 risk categories. Without this skill: 0 caught. With this skill: all caught.**
+Your PM just had Claude write some code. It looks great. Claude said it was fine.
 
-A Claude Code skill that acts as an active session guardian for non-technical contributors — PMs, designers, researchers — shipping AI-assisted code in shared codebases.
+"Claude said it was fine" is not a safety check. This is.
 
-The difference from a checklist: **Claude reads your actual git state and scans real files. You don't self-report anything. Every flag cites the file and line.**
+---
+
+**If you're the one shipping the code** (PM, designer, researcher):
+
+You didn't ask to become a software engineer. You just needed the button to say "Submit" instead of "Send." Claude wrote it, it seemed fine, and now there's a small chance you're about to commit directly to main, lower the test coverage threshold so CI goes green, or push a file with an API key in it that wasn't even in your diff.
+
+This catches all of that. Run `vibe-safe` before you commit. You don't need to understand git internals — Claude does the checks and tells you in plain English what to do next.
+
+**Your developer will still love you. Probably.**
+
+---
+
+**If you're the developer:**
+
+Your PM is going to vibe-code into your codebase. This is not a hypothesis. Install this on their machine before your next vacation — it's 21 automated checks that run on every `git commit` without Claude, without you, and without anyone having to remember anything. It covers the full failure surface: credentials, main-branch commits, suppressed errors, skipped tests, SSL disabled, private key files, quality threshold lowering, and 21 more.
+
+You're welcome.
+
+---
+
+**28 risk categories. Every flag cites file:line. Claude reads the actual git state — nothing is self-reported.**
 
 ---
 
