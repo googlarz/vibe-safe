@@ -1,26 +1,12 @@
 # vibe-safe
 
-Your PM just had Claude write some code. It looks great. Claude said it was fine.
-
-"Claude said it was fine" is not a safety check. This is.
-
----
-
-**If you're the one shipping the code** (PM, designer, researcher):
-
-You didn't ask to become a software engineer. You just needed the button to say "Submit" instead of "Send." Claude wrote it, it seemed fine, and now there's a small chance you're about to commit directly to main, lower the test coverage threshold so CI goes green, or push a file with an API key in it that wasn't even in your diff.
-
-This catches all of that. Run `vibe-safe` before you commit. You don't need to understand git internals — Claude does the checks and tells you in plain English what to do next.
+**For non-technical contributors:** You didn't ask to become a software engineer. You just needed the button to say "Submit" instead of "Send." Claude wrote the code, it looked fine, and now there's a non-zero chance you're about to commit an API key directly to main with a commit message that says "update stuff." This catches that. Run it before you touch anything — Claude reads your actual git state and tells you exactly what to do next. You don't need to understand what any of it means.
 
 **Your developer will still love you. Probably.**
 
----
+**For developers:** Your PM is going to vibe-code into the codebase. This is not a hypothesis, it's already happening. Install this on their machine before your next vacation — 28 automated checks run on every `git commit` without Claude, without you, and without anyone having to remember anything. Credentials, main-branch commits, suppressed errors, skipped tests, SSL disabled, quality thresholds quietly lowered so CI goes green. All of it.
 
-**If you're the developer:**
-
-Your PM is going to vibe-code into your codebase. This is not a hypothesis. Install this on their machine before your next vacation — it's 21 automated checks that run on every `git commit` without Claude, without you, and without anyone having to remember anything. It covers the full failure surface: credentials, main-branch commits, suppressed errors, skipped tests, SSL disabled, private key files, quality threshold lowering, and 21 more.
-
-You're welcome.
+**You're welcome.**
 
 ---
 
