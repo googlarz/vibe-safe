@@ -80,12 +80,30 @@ Claude runs:
    - "What areas are definitely yours to edit freely (copy, images, marketing)?"
    Then writes the file and shows you what to commit.
 
-   **For developers setting up a shared repo:** Claude also asks:
-   - "Should new source code always come with test changes? (`require_tests`)"
-   - "What's the max number of files a single PM commit should touch? (`max_changed_files`)"
-   - "Any terms that should never appear in committed code? e.g. TODO, FIXME (`block_pattern`)"
-   - "Who should always be added as reviewer on PM PRs? (`require_reviewer`)"
-   Contracts are written as additional keys in `.vibesafe` and enforced in every subsequent COMMIT and VERIFY run.
+   **For developers setting up a shared repo:** Claude reads the repo before asking anything, then proposes contract values with evidence:
+
+   ```
+   Claude runs:
+   find . -name "*.test.*" -o -name "*_test.*" -o -name "*.spec.*" | head -20
+   → Found 47 test files → proposing require_tests: true
+
+   git log --oneline -30 | xargs -I{} git diff --name-only {}^ {} | wc -l ÷ 30
+   → Average commit touches 7 files → proposing max_changed_files: 12
+
+   find . -path "*/migrations/*" | head -10 → then checks each for def down / exports.down
+   → 3 migration files, all have rollbacks → proposing require_migration_rollback: true
+
+   git grep -rn "TODO" --include="*.ts" --include="*.py" | wc -l
+   → 2 TODOs in entire codebase → proposing block_pattern: TODO (low noise)
+
+   git log --format="%ae" -50 | sort | uniq -c | sort -rn | head -3
+   → alice@co.com reviewed 80% of commits → proposing require_reviewer: @alice
+
+   ls .env.example .env.sample 2>/dev/null
+   → .env.example exists → env drift check will be active
+   ```
+
+   Claude presents a proposed `.vibesafe` with rationale for each value. Developer confirms, adjusts numbers, or removes rules they don't want. Nothing is written without confirmation.
 
 ---
 
