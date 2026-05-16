@@ -103,25 +103,13 @@ Claude runs:
    → .env.example exists → env drift check will be active
    ```
 
-   After discovery, Claude produces two things:
-
-   **1. A draft `.vibesafe`** with auto-inferred values and confidence notes:
-   ```
-   # Auto-discovered — confirm or adjust before committing
-   require_tests: true               # 47 test files found
-   max_changed_files: 12             # avg 7 files/commit × 1.5 buffer
-   require_migration_rollback: true  # all 3 existing migrations have down()
-   block_pattern: TODO               # only 2 TODOs in codebase — low noise
-   require_reviewer: @alice          # top committer in src/
-   ```
-
-   **2. A single document to paste into Slack or email** — discovered rules shown inline for confirmation, open questions below:
+   Discovery runs silently, then Claude produces one document to paste into Slack or email. Discovered rules appear with confirmation prompts; open questions cover the rest:
 
    ```
    Hi — setting up a safety tool before I commit code.
    Can you confirm what I found and answer a few questions?
 
-   FOUND IN REPO — confirm or adjust:
+   FOUND IN REPO:
 
    ✅ require_tests — found 47 test files
       Keep? Yes / No / Only for: ___
@@ -133,12 +121,12 @@ Claude runs:
       Keep? Yes / No
 
    ✅ block_pattern: TODO — only 2 TODOs in entire codebase
-      Keep? Yes / No / Add more blocked terms: ___
+      Keep? Yes / No / Add more: ___
 
    ✅ require_reviewer: @alice — top committer across src/
       Right person? Yes / Change to: ___
 
-   NEED YOUR INPUT:
+   QUESTIONS:
 
    1. Any folders I should never touch without you?
       (already flagging: migrations/, src/auth/ — anything else?)
@@ -152,7 +140,7 @@ Claude runs:
       →
    ```
 
-   PM sends, pastes answers back. Claude merges discovery + answers into final `.vibesafe`, shows plain-English diff ("added src/billing/ as danger zone, lowered max files from 12 to 8"). Nothing written until confirmed.
+   PM pastes the answers back. Claude writes `.vibesafe`. Done.
 
 ---
 
