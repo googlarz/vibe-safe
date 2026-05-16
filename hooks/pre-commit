@@ -310,4 +310,52 @@ if [ -f ".vibesafe" ]; then
   fi
 fi
 
-echo "vibe-safe: all 24 checks passed -- clear"
+# 25. Missing await on async calls (common Claude bug)
+JS_CHANGES=$(echo "$STAGED_FILES" | grep -E "\.(js|ts|jsx|tsx|mjs|cjs)$" 2>/dev/null)
+if [ -n "$JS_CHANGES" ]; then
+  MISSING_AWAIT=""
+  for sf in $STAGED_FILES; do
+    case "$sf" in *.js|*.ts|*.jsx|*.tsx|*.mjs|*.cjs) ;;
+      *) continue ;;
+    esac
+    FILE_ADDED=$(git diff --cached -- "$sf" 2>/dev/null | grep "^+" | grep -v "^+++")
+    MATCH=$(echo "$FILE_ADDED" | grep -E "[^=!<>]=[[:space:]]*(fetch|axios|prisma\.|db\.|User\.|Order\.|mongoose\.)" 2>/dev/null | grep -v "await" | grep -v "==" | grep -v "=>")
+    [ -n "$MATCH" ] && MISSING_AWAIT="${MISSING_AWAIT:+$MISSING_AWAIT
+}$sf: $MATCH"
+  done
+  [ -n "$MISSING_AWAIT" ] && echo "vibe-safe: possible missing await on async call — result may be a Promise, not a value
+$MISSING_AWAIT"
+fi
+
+# 26. Math.random() in security-sensitive file
+SEC_RAND=$(git diff --cached -- '*.js' '*.ts' '*.jsx' '*.tsx' 2>/dev/null | grep "^+" | grep -v "^+++" | grep -E "Math\.random\(\)" 2>/dev/null)
+if [ -n "$SEC_RAND" ]; then
+  SEC_FILES=$(echo "$STAGED_FILES" | grep -iE "auth|token|session|crypto|key|secret|password" 2>/dev/null)
+  if [ -n "$SEC_FILES" ]; then
+    bail "STOP — Math.random() in security-related file: use crypto.randomBytes() or crypto.randomUUID()
+$SEC_RAND" "" ""
+  fi
+fi
+
+# 27. SQL string concatenation (injection risk)
+SQLI=$(git diff --cached 2>/dev/null | grep "^+" | grep -v "^+++" | grep -E "\b(SELECT|INSERT|UPDATE|DELETE)\b" | grep -E "f['\"]|['\"].*\+[^=]|\+[[:space:]]*[a-zA-Z_]" 2>/dev/null)
+[ -n "$SQLI" ] && bail "STOP — SQL string concatenation: use parameterized queries, string-built SQL is injectable
+$SQLI" "" ""
+
+# 28. Shell injection risk
+SHELL_INJ=$(git diff --cached 2>/dev/null | grep "^+" | grep -v "^+++" | grep -E "shell:[[:space:]]*true|shell=True|subprocess.*shell=True" 2>/dev/null)
+[ -n "$SHELL_INJ" ] && bail "STOP — shell:true passes command through /bin/sh — unsanitized input becomes code execution
+$SHELL_INJ" "" ""
+
+# 29. Test file with no assertions
+TEST_STAGED=$(echo "$STAGED_FILES" | grep -E "\.(test|spec)\.(js|ts|jsx|tsx)$|_test\.(js|ts|py|go|rb)$" 2>/dev/null)
+if [ -n "$TEST_STAGED" ]; then
+  for tf in $TEST_STAGED; do
+    FILE_ADDED=$(git diff --cached -- "$tf" 2>/dev/null | grep "^+" | grep -v "^+++")
+    HAS_TEST=$(echo "$FILE_ADDED" | grep -E "it\(|test\(|describe\(" 2>/dev/null)
+    HAS_ASSERT=$(echo "$FILE_ADDED" | grep -E "expect\(|assert\.|\.toBe|\.toEqual|\.toHaveBeenCalled|\.toThrow|\.toMatch" 2>/dev/null)
+    [ -n "$HAS_TEST" ] && [ -z "$HAS_ASSERT" ] && echo "vibe-safe: test added without assertions in $tf — test always passes regardless of behavior"
+  done
+fi
+
+echo "vibe-safe: all 29 checks passed -- clear"

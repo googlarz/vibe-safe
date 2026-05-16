@@ -8,7 +8,7 @@ Run this before you commit. It reads your actual git state, not what you assume 
 
 ---
 
-**32 risk categories. Developer-defined contracts. Every flag cites file:line. Claude reads the actual git state — nothing is self-reported.**
+**40 risk categories. Developer-defined contracts. Every flag cites file:line. Claude reads the actual git state — nothing is self-reported.**
 
 ---
 
@@ -48,6 +48,14 @@ Run this before you commit. It reads your actual git state, not what you assume 
 | Migration with no rollback | No check | Flagged — schema change that can't be undone automatically |
 | New source code, no test changes | No check | Flagged (or hard-blocked via `require_tests`) |
 | Claude changed more files than asked | No check | SCOPE mode — intent vs diff, file-by-file verdict |
+| `Math.random()` in auth/token/session file | No check | STOP — not cryptographically secure |
+| SQL string concatenation / f-string SQL | No check | STOP — injection risk, use parameterized queries |
+| `shell: true` / `shell=True` in subprocess | No check | STOP — command injection via unsanitized input |
+| Missing `await` on async DB/HTTP call | No check | Flagged — result is likely a Promise, not a value |
+| Test block added with no assertions | No check | Flagged — test always passes, behavior unchecked |
+| gitleaks (entropy-based credential scan) | No check | STOP if installed — catches what grep misses |
+| semgrep (OWASP rule-based analysis) | No check | STOP if installed — injection, traversal, and more |
+| npm audit (known CVEs in dependencies) | No check | STOP if installed — high/critical CVEs blocked |
 
 ---
 
@@ -111,6 +119,8 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 **CI writes a PR comment and step summary.** When `GH_TOKEN` and `PR_NUMBER` are available, the CI script posts (or updates) a `<!-- vibe-safe-audit -->` comment on the PR with all findings — no need to dig through the Actions log. The comment is deduplicated: re-runs update the same comment in place. A matching job summary appears in the Actions tab. Fork PRs with read-only tokens get a logged skip, not a silent failure.
 
 **`require_reviewer` enforced in CI.** Set `require_reviewer: @alice` in `.vibesafe` and the CI script checks GitHub's reviewer API — if the named reviewer hasn't been added, the check fails. Only runs when `GH_TOKEN` and `PR_NUMBER` are available; skips with a warning otherwise.
+
+**Optional tooling integration.** When gitleaks, semgrep, or npm audit are installed in CI, vibe-safe runs them automatically. gitleaks detects high-entropy secrets that grep misses (Base64-encoded keys, rotated patterns). semgrep applies OWASP rule sets for injection, path traversal, and deserialization. npm audit flags known CVEs in your dependency tree. All three degrade gracefully — if a tool isn't installed, its check is silently skipped.
 
 **Agentic remediation.** COMMIT mode fixes what's fixable instead of just flagging:
 
@@ -247,6 +257,23 @@ Five additional mode tests passed: BEFORE (main-branch stop), CONFLICT (auth fil
 | Clean change | pass | ✅ passed |
 
 **15/15 tests passed.** Two bugs fixed during CI test authoring: env drift upgraded from warn to fail (parity with hook), block_pattern false positive when `.vibesafe` itself contains the blocked pattern.
+
+**v1.9.0 new-check verification (10 tests, automated):** Five new manual checks and optional tooling integration tested:
+
+| Scenario | Expected | Result |
+|----------|----------|--------|
+| `Math.random()` in `auth.ts` | STOP | ✅ caught |
+| `Math.random()` in `animation.ts` | pass | ✅ passed |
+| SQL string concatenation `"SELECT..." + var` | STOP | ✅ caught |
+| `shell: true` in script | STOP | ✅ caught |
+| Test block added with no assertions | pass (warns) | ✅ warned, didn't block |
+| Same 5 checks in CI script | STOP/warn | ✅ matched hook behavior |
+| gitleaks absent — graceful skip | pass | ✅ no false failure |
+| semgrep absent — graceful skip | pass | ✅ no false failure |
+| npm audit absent — graceful skip | pass | ✅ no false failure |
+| All pre-existing checks (15/15 CI, 20/20 hook) | no regressions | ✅ all passing |
+
+**10/10 tests passed.** Optional tooling (gitleaks, semgrep, npm audit) fails gracefully when not installed — same checks still run via grep.
 
 ---
 

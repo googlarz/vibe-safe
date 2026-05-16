@@ -5,7 +5,7 @@
 
 BASE_BRANCH="${BASE_BRANCH:-${GITHUB_BASE_REF:-main}}"
 CRED_PATTERN="sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="
-VIBESAFE_VERSION="1.8.1"
+VIBESAFE_VERSION="1.9.0"
 
 # Use GH_TOKEN or GITHUB_TOKEN (GitHub Actions sets GITHUB_TOKEN automatically)
 GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
@@ -44,6 +44,33 @@ CREDS=$(git grep -nE "$CRED_PATTERN" 2>/dev/null)
 if [ -n "$CREDS" ]; then
   fail "STOP — credential pattern in tracked files" "$CREDS" \
     "Rotate this credential immediately — git history is permanent even after deletion."
+fi
+
+# ─── Optional tooling (graceful degradation when not installed) ────────────────
+
+# T1. gitleaks — entropy-based credential detection (catches what grep misses)
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks detect --no-git --source . --quiet 2>/dev/null; then
+    fail "STOP — gitleaks found high-entropy credential pattern" "" \
+      "Run: gitleaks detect --verbose for details. Rotate any exposed secrets."
+  fi
+fi
+
+# T2. semgrep — rule-based security analysis
+if command -v semgrep >/dev/null 2>&1; then
+  if ! semgrep --config=auto --quiet --error . 2>/dev/null; then
+    fail "STOP — semgrep flagged a security issue" "" \
+      "Run: semgrep --config=auto . for details."
+  fi
+fi
+
+# T3. npm audit — known CVEs in dependencies
+if [ -n "$PKG" ] && command -v npm >/dev/null 2>&1; then
+  AUDIT_OUT=$(npm audit --audit-level=high --json 2>/dev/null)
+  if echo "$AUDIT_OUT" | grep -q '"severity":"high"\|"severity":"critical"'; then
+    fail "STOP — npm audit found high/critical vulnerability" "" \
+      "Run: npm audit for details and upgrade paths."
+  fi
 fi
 
 # 2. Danger zone files (warning in CI — PR review is the gate)
@@ -246,6 +273,51 @@ if [ -f ".vibesafe" ]; then
       warn "require_reviewer=${REQ_REVIEWER} — skipped (GH_TOKEN or PR_NUMBER not available)" ""
     fi
   fi
+fi
+
+# 21. Missing await on async calls (common Claude bug)
+JS_CHANGES=$(echo "$CHANGED_FILES" | grep -E "\.(js|ts|jsx|tsx|mjs|cjs)$" 2>/dev/null)
+if [ -n "$JS_CHANGES" ]; then
+  MISSING_AWAIT=""
+  for sf in $JS_CHANGES; do
+    FILE_ADDED=$(git diff "origin/$BASE_BRANCH"...HEAD -- "$sf" 2>/dev/null | grep "^+" | grep -v "^+++")
+    MATCH=$(echo "$FILE_ADDED" | grep -E "[^=!<>]=[[:space:]]*(fetch|axios|prisma\.|db\.|User\.|Order\.|mongoose\.)" 2>/dev/null | grep -v "await" | grep -v "==" | grep -v "=>")
+    [ -n "$MATCH" ] && MISSING_AWAIT="${MISSING_AWAIT:+$MISSING_AWAIT
+}$sf: $MATCH"
+  done
+  [ -n "$MISSING_AWAIT" ] && warn "Possible missing await on async call — result may be a Promise, not a value" "$MISSING_AWAIT"
+fi
+
+# 22. Math.random() in security-sensitive file
+SEC_RAND=$(echo "$ADDED" | grep -E "Math\.random\(\)" 2>/dev/null)
+if [ -n "$SEC_RAND" ]; then
+  SEC_FILES=$(echo "$CHANGED_FILES" | grep -iE "auth|token|session|crypto|key|secret|password" 2>/dev/null)
+  if [ -n "$SEC_FILES" ]; then
+    fail "STOP — Math.random() in security-related file" "$SEC_RAND" \
+      "Use crypto.randomBytes() or crypto.randomUUID() — Math.random() is not cryptographically secure."
+  fi
+fi
+
+# 23. SQL string concatenation (injection risk)
+SQLI=$(echo "$ADDED" | grep -E '(SELECT|INSERT|UPDATE|DELETE|WHERE).*["\x27][[:space:]]*\+|f["\x27](SELECT|INSERT|UPDATE|DELETE)' 2>/dev/null)
+[ -n "$SQLI" ] && fail "STOP — SQL string concatenation" "$SQLI" \
+  "Use parameterized queries / prepared statements. String-built SQL is injectable."
+
+# 24. Shell injection risk
+SHELL_INJ=$(echo "$ADDED" | grep -E "shell:[[:space:]]*true|shell=True|subprocess.*shell=True" 2>/dev/null)
+[ -n "$SHELL_INJ" ] && fail "STOP — shell:true passes command through /bin/sh — unsanitized input becomes code execution" "$SHELL_INJ" \
+  "Pass command as an array instead of a string, and do not set shell:true."
+
+# 25. Test file changed with no assertions
+TEST_CHANGED=$(echo "$CHANGED_FILES" | grep -E "\.(test|spec)\.(js|ts|jsx|tsx)$|_test\.(js|ts|py|go|rb)$" 2>/dev/null)
+if [ -n "$TEST_CHANGED" ]; then
+  for tf in $TEST_CHANGED; do
+    FILE_ADDED=$(git diff "origin/$BASE_BRANCH"...HEAD -- "$tf" 2>/dev/null | grep "^+" | grep -v "^+++")
+    HAS_TEST=$(echo "$FILE_ADDED" | grep -E "it\(|test\(|describe\(" 2>/dev/null)
+    HAS_ASSERT=$(echo "$FILE_ADDED" | grep -E "expect\(|assert\.|\.toBe|\.toEqual|\.toHaveBeenCalled|\.toThrow|\.toMatch" 2>/dev/null)
+    [ -n "$HAS_TEST" ] && [ -z "$HAS_ASSERT" ] && \
+      warn "Test added without assertions in $tf — test always passes regardless of behavior" "$tf"
+  done
 fi
 
 # ─── Step summary + PR comment ────────────────────────────────────────────────

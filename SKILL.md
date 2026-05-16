@@ -356,6 +356,33 @@ Five automated checks, each with remediation:
     - `require_tests`, `require_migration_rollback` — enforced in checks 31 and 30 above
     - `require_reviewer: @handle` — stored; added to PR description in PR mode
 
+33. **Insecure random in security file** — `Math.random()` added in files named `auth`, `token`, `session`, `jwt`, `oauth`, `login`, `credential`, `password`
+    - Found → **STOP**: "Math.random() is not cryptographically secure — use crypto.getRandomValues() or crypto.randomUUID() for auth/session tokens"
+
+34. **SQL string interpolation** — added lines matching `"SELECT" + `, `f"SELECT`, `` `SELECT ${``, `"INSERT" +`, `f"INSERT`, `"UPDATE" +`, `f"UPDATE`
+    - Found → **STOP**: "SQL built by string concatenation is vulnerable to injection — use parameterized queries or a query builder"
+
+35. **Shell injection via subprocess** — `shell: true` (JS/TS) or `shell=True` (Python) added in subprocess/exec calls
+    - Found → **STOP**: "shell=True passes the command through the shell — unsanitized user input reaching this is command injection"
+
+36. **Missing await on async call** — added lines matching `= db.`, `= await` expected but `await` absent, or assignment from a known async pattern (`.findOne(`, `.query(`, `.fetch(`, `.get(`, `.post(`) without `await`
+    - Found → flag: "Result is likely a Promise object, not the actual value — add await or the call is silently a no-op"
+
+37. **Test block with no assertions** — `it(` / `test(` / `describe(` block added with no `expect(`, `assert`, `should`, `toBe`, `toEqual`, `toHaveBeenCalled` inside
+    - Found → flag: "Test added with no assertions — it will always pass regardless of what the code does"
+
+38. **gitleaks scan** (if installed) — run `gitleaks detect --source . --no-git` on staged files
+    - Not installed → silently skip (grep-based credential scan still runs)
+    - Installed + finds credential → **STOP**: "gitleaks detected a high-entropy secret — rotate immediately, even if it looks like a placeholder"
+
+39. **semgrep scan** (if installed) — run `semgrep --config=p/owasp-top-ten --quiet` on staged files
+    - Not installed → silently skip
+    - Installed + finds match → **STOP**: "semgrep flagged an OWASP rule match — [rule id and file:line cited]"
+
+40. **npm audit** (if installed and `package.json` staged or present) — run `npm audit --audit-level=high --json`
+    - Not installed → silently skip
+    - Installed + high/critical CVE found → **STOP**: "npm audit found [N] high/critical vulnerabilities — review before committing"
+
 **When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
 ---
@@ -384,7 +411,7 @@ Also checks: are you targeting the right base branch? Is your branch up to date?
 | Check | Result |
 |-------|--------|
 | Credential scan | ✅ Clean |
-| 28 commit checks | ✅ Passed |
+| 36 commit checks | ✅ Passed |
 | Scope audit | ✅ 4 files, all in scope |
 | Test coverage | ⚠️ 2 new functions, no test changes (acknowledged) |
 | .env.example drift | ✅ No new env vars |
