@@ -41,7 +41,7 @@ fi
 DANGER=""
 for f in $CHANGED_FILES; do
   case "$f" in
-    .env|.env.*|*.conf|Dockerfile|docker-compose*|\
+    .env|.env.local|.env.production|.env.staging|.env.development|*.conf|Dockerfile|docker-compose*|\
     .github/workflows/*|Jenkinsfile|.circleci/*|.gitlab-ci.yml|\
     */migrations/*|*/schema/*|*.sql|\
     webpack.config.*|vite.config.*|tsconfig.json|\
@@ -174,18 +174,31 @@ if [ -f ".vibesafe" ]; then
   # max_changed_files
   MAX=$(grep "^max_changed_files:" .vibesafe 2>/dev/null | sed 's/.*:[[:space:]]*//' | head -1)
   if [ -n "$MAX" ]; then
-    FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c "." 2>/dev/null || echo 0)
+    FILE_COUNT=0
+    if [ -n "$CHANGED_FILES" ]; then
+      FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
+    fi
     if [ "$FILE_COUNT" -gt "$MAX" ]; then
       warn "Developer contract: max_changed_files=$MAX exceeded ($FILE_COUNT files changed)" "$CHANGED_FILES"
     fi
   fi
-  # block_pattern
+  # block_pattern — check per implementation file (skips test/md files)
   while IFS= read -r line; do
     case "$line" in
       block_pattern:*)
         PAT=$(echo "$line" | sed 's/^block_pattern:[[:space:]]*//')
-        IMPL_ADDED=$(echo "$ADDED" | grep -v -iE "\.(md|txt)$|\.(test|spec)\.|__tests__" 2>/dev/null)
-        BLOCKED=$(echo "$IMPL_ADDED" | grep -F "$PAT" 2>/dev/null)
+        BLOCKED=""
+        for cf in $CHANGED_FILES; do
+          case "$cf" in
+            *.test.*|*.spec.*|*__tests__*|*_test.*|*.md|*.txt) continue ;;
+          esac
+          FILE_ADDED=$(git diff "origin/$BASE_BRANCH"...HEAD -- "$cf" 2>/dev/null | grep "^+" | grep -v "^+++" 2>/dev/null)
+          MATCH=$(echo "$FILE_ADDED" | grep -F "$PAT" 2>/dev/null)
+          if [ -n "$MATCH" ]; then
+            BLOCKED="${BLOCKED:+$BLOCKED
+}$cf: $MATCH"
+          fi
+        done
         [ -n "$BLOCKED" ] && fail "STOP — developer contract: blocked pattern '$PAT' in added code" "$BLOCKED" \
           "Team has blocked this pattern. Remove it before merging."
         ;;
