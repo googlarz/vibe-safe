@@ -138,7 +138,9 @@ Commit `.vibesafe` once. Every contributor — and the pre-commit hook and CI �
 ## Modes
 
 ### BEFORE
-Runs before Claude writes anything. Checks your branch (creates a feature branch if on main), traces who owns the target files via git log, installs the pre-commit hook if missing, generates `.vibesafe` if missing, and produces a scoped prompt that limits what files Claude is allowed to touch.
+Runs before Claude writes anything. Checks your branch (creates a feature branch if on main), traces who owns the target files via git log, installs the pre-commit hook and CI workflow if missing, and produces a scoped prompt that limits what files Claude is allowed to touch.
+
+If no `.vibesafe` exists: Claude scans the repo to discover rules (test file count, average commit size, migration rollback patterns, top committers), then generates a single document to paste into Slack or email — discovered rules with inline confirmation prompts, open questions below. PM sends it, pastes the answers back, Claude writes `.vibesafe`.
 
 ### REVIEW
 After Claude writes code, before you commit. Runs `git diff HEAD` for unstaged changes **and** `git grep` across all tracked files for credential patterns. Credentials live in files you didn't intend to change and won't appear in your diff.
