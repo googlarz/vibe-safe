@@ -26,9 +26,10 @@ Claude just proposed something that feels big → ALARM mode
 "what does this flag mean?" / need deeper explanation → EXPLAIN mode
 developer reviewing a vibe-coded PR → REVIEWER mode
 checking whether past commits contain mistakes → HISTORY mode
+`.vibesafe` exists and repo has changed significantly → REFRESH mode
 ```
 
-Or invoke directly: `vibe-safe before / review / scope / commit / pr / conflict / alarm / history / explain / reviewer`
+Or invoke directly: `vibe-safe before / review / scope / commit / pr / conflict / alarm / history / explain / reviewer / refresh`
 
 ---
 
@@ -141,6 +142,54 @@ Claude runs:
    ```
 
    PM pastes the answers back. Claude writes `.vibesafe`. Done.
+
+   **Stack-aware questions** — before sending the questionnaire, Claude runs:
+   ```
+   ls package.json Gemfile requirements.txt Cargo.toml go.mod pom.xml 2>/dev/null
+   ```
+   and adds one targeted section based on what it finds:
+
+   | Stack detected | Extra questions added |
+   |---------------|----------------------|
+   | `package.json` + React/Next.js | "Do you have server-side API routes I shouldn't touch? Any SSR/ISR pages with special caching?" |
+   | `package.json` + Express/Node API | "Any rate-limiting or auth middleware paths? Background job queues?" |
+   | `Gemfile` (Rails) | "Any Mailers, Sidekiq workers, or background jobs? Admin panel at `/admin`?" |
+   | `requirements.txt` / `pyproject.toml` (Django/FastAPI) | "Any Celery tasks, admin customizations, or Django signals?" |
+   | `go.mod` | "Any gRPC service definitions or generated protobuf files I shouldn't edit?" |
+   | `Cargo.toml` | "Any FFI bindings or unsafe blocks that need special review?" |
+
+   Stack-specific danger zones are also auto-suggested (e.g., `danger_zone: pages/api/` for Next.js, `danger_zone: app/jobs/` for Rails).
+
+---
+
+## Mode: REFRESH
+
+Run when `.vibesafe` already exists but the repo has evolved and the rules may be stale.
+
+Claude re-runs the same discovery as BEFORE mode (test file count, average commit size, migration patterns, TODOs, top committers) and diffs the findings against the existing `.vibesafe`:
+
+**Output — three sections:**
+
+```
+UNCHANGED (still accurate):
+  require_migration_rollback: true — 5 migration files, all have rollbacks ✅
+
+DRIFTED (rule exists but evidence changed):
+  max_changed_files: 12 → evidence now suggests 18 (avg commit grew from 7 → 11 files)
+  Proposed update: max_changed_files: 18
+  Keep current / Update / Remove?
+
+NEW (found in repo, not yet in .vibesafe):
+  block_pattern: FIXME — found 0 FIXMEs in codebase, low noise
+  Add? Yes / No
+
+MISSING (in .vibesafe, no longer evidence-backed):
+  require_reviewer: @alice — alice@co.com has only 3 commits in last 90 days (was top reviewer)
+  New top committer: bob@co.com (67% of recent commits)
+  Update to: @bob? Yes / No / Keep @alice
+```
+
+Claude proposes only changes — if a rule is still accurate it stays untouched. PM sends the diff to the developer, gets sign-off, Claude applies the updates to `.vibesafe` and commits.
 
 ---
 

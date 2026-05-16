@@ -8,6 +8,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: read
+  pull-requests: write   # needed to post/update PR comment
+
 jobs:
   vibe-safe:
     name: Safety checks
@@ -21,4 +25,7 @@ jobs:
       - name: Run vibe-safe checks
         env:
           BASE_BRANCH: ${{ github.base_ref || 'main' }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: sh .github/vibe-safe/vibe-safe-ci.sh

@@ -5,8 +5,15 @@
 
 BASE_BRANCH="${BASE_BRANCH:-${GITHUB_BASE_REF:-main}}"
 CRED_PATTERN="sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="
+VIBESAFE_VERSION="1.8.1"
+
+# Use GH_TOKEN or GITHUB_TOKEN (GitHub Actions sets GITHUB_TOKEN automatically)
+GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
 
 # GitHub Actions annotation helpers
+FAILED=0
+FINDINGS=""
+
 fail() {
   echo "::error::vibe-safe: $1"
   printf '%s\n' "$2"
@@ -14,15 +21,17 @@ fail() {
   echo "$3"
   echo ""
   FAILED=1
+  FINDINGS="${FINDINGS}❌ **STOP** — $1
+"
 }
 
 warn() {
   echo "::warning::vibe-safe: $1"
   printf '%s\n' "$2"
   echo ""
+  FINDINGS="${FINDINGS}⚠️  $1
+"
 }
-
-FAILED=0
 
 # Get changed files and diff vs base branch
 git fetch origin "$BASE_BRANCH" --depth=1 2>/dev/null || true
@@ -146,7 +155,8 @@ ENV_REFS=$(echo "$ADDED" | grep -E "process\.env\.|os\.environ\[|getenv\(|import
 if [ -n "$ENV_REFS" ]; then
   ENV_EXAMPLE_CHANGED=$(echo "$CHANGED_FILES" | grep -E "^\.env\.example$|^\.env\.sample$" 2>/dev/null)
   if [ -z "$ENV_EXAMPLE_CHANGED" ]; then
-    warn "New env variable referenced without .env.example update" "$ENV_REFS"
+    fail "STOP — new env variable without .env.example update" "$ENV_REFS" \
+      "Other developers won't know to set this variable. Add it to .env.example first."
   fi
 fi
 
@@ -190,7 +200,7 @@ if [ -f ".vibesafe" ]; then
         BLOCKED=""
         for cf in $CHANGED_FILES; do
           case "$cf" in
-            *.test.*|*.spec.*|*__tests__*|*_test.*|*.md|*.txt) continue ;;
+            *.test.*|*.spec.*|*__tests__*|*_test.*|*.md|*.txt|.vibesafe) continue ;;
           esac
           FILE_ADDED=$(git diff "origin/$BASE_BRANCH"...HEAD -- "$cf" 2>/dev/null | grep "^+" | grep -v "^+++" 2>/dev/null)
           MATCH=$(echo "$FILE_ADDED" | grep -F "$PAT" 2>/dev/null)
@@ -214,6 +224,72 @@ if [ -f ".vibesafe" ]; then
         "Team requires test changes alongside source changes."
     fi
   fi
+fi
+
+# 20. require_reviewer — enforced when GH_TOKEN + PR_NUMBER are available
+if [ -f ".vibesafe" ]; then
+  REQ_REVIEWER=$(grep "^require_reviewer:" .vibesafe 2>/dev/null | sed 's/^require_reviewer:[[:space:]]*//')
+  if [ -n "$REQ_REVIEWER" ]; then
+    if [ -n "$GH_TOKEN" ] && [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_REPOSITORY" ]; then
+      REQUESTED=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" \
+        --jq '.users[].login' 2>/dev/null)
+      REVIEWED=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+        --jq '.[].user.login' 2>/dev/null)
+      for reviewer in $REQ_REVIEWER; do
+        login=$(echo "$reviewer" | tr -d '@')
+        if ! printf '%s\n%s\n' "$REQUESTED" "$REVIEWED" | grep -qx "$login"; then
+          fail "STOP — developer contract: required reviewer @${login} not assigned" "" \
+            "Add @${login} as a reviewer before merging."
+        fi
+      done
+    else
+      warn "require_reviewer=${REQ_REVIEWER} — skipped (GH_TOKEN or PR_NUMBER not available)" ""
+    fi
+  fi
+fi
+
+# ─── Step summary + PR comment ────────────────────────────────────────────────
+
+if [ "$FAILED" = "1" ]; then
+  AUDIT_STATUS="❌ Failed"
+  AUDIT_NOTE="**Fix blocking issues above before merging.**"
+else
+  AUDIT_STATUS="✅ Passed"
+  AUDIT_NOTE="All checks passed — clear to merge."
+fi
+
+COMMENT_BODY="<!-- vibe-safe-audit -->
+## vibe-safe audit — ${AUDIT_STATUS}
+
+${FINDINGS:-No issues found.}
+${AUDIT_NOTE}
+
+---
+*[vibe-safe](https://github.com/googlarz/vibe-safe) v${VIBESAFE_VERSION}*"
+
+# Write to GitHub Actions job summary
+if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+  printf '%s\n' "$COMMENT_BODY" >> "$GITHUB_STEP_SUMMARY"
+fi
+
+# Post or update PR comment (gracefully handles fork PRs with read-only tokens)
+if [ -n "$GH_TOKEN" ] && [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_REPOSITORY" ]; then
+  EXISTING_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+    --jq '.[] | select(.body | startswith("<!-- vibe-safe-audit -->")) | .id' 2>/dev/null | head -1)
+  BODY_FILE=$(mktemp)
+  printf '%s' "$COMMENT_BODY" > "$BODY_FILE"
+  if [ -n "$EXISTING_ID" ]; then
+    gh api "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING_ID" \
+      -X PATCH --input "$BODY_FILE" >/dev/null 2>&1 \
+      && echo "vibe-safe: PR comment updated" \
+      || echo "vibe-safe: PR comment update skipped (fork PR — token is read-only)"
+  else
+    gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+      --input "$BODY_FILE" >/dev/null 2>&1 \
+      && echo "vibe-safe: PR comment posted" \
+      || echo "vibe-safe: PR comment post skipped (fork PR — token is read-only)"
+  fi
+  rm -f "$BODY_FILE"
 fi
 
 echo ""

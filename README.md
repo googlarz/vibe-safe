@@ -91,9 +91,10 @@ Claude proposed something that feels big → ALARM mode
 "what does this flag mean?"              → EXPLAIN mode
 Developer reviewing a vibe-coded PR      → REVIEWER mode
 Checking whether past commits are clean  → HISTORY mode
+.vibesafe exists, repo has evolved       → REFRESH mode
 ```
 
-Or invoke directly: `vibe-safe commit` / `vibe-safe explain ssl` / `vibe-safe reviewer` / etc.
+Or invoke directly: `vibe-safe commit` / `vibe-safe explain ssl` / `vibe-safe reviewer` / `vibe-safe refresh` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
 
@@ -106,6 +107,10 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 **Pre-commit hook runs without Claude.** BEFORE mode installs `hooks/pre-commit` into `.git/hooks/pre-commit`. From then on, 24 mechanical checks run on every `git commit` whether or not you remember to invoke the skill. Branch check, credential scan, Danger Zone audit, suppression patterns, security sinks, private key files, env var drift, migration rollback, developer contracts — all in pure shell.
 
 **CI integration closes the bypass gap.** The hook can be skipped with `git commit --no-verify`. The GitHub Actions workflow cannot. BEFORE mode also installs `ci/vibe-safe-ci.sh` + `ci/workflow.yml` — the same checks run on every push and PR, with GitHub annotations for each finding. `--no-verify` is auto-escalated to ALARM if Claude proposes it.
+
+**CI writes a PR comment and step summary.** When `GH_TOKEN` and `PR_NUMBER` are available, the CI script posts (or updates) a `<!-- vibe-safe-audit -->` comment on the PR with all findings — no need to dig through the Actions log. The comment is deduplicated: re-runs update the same comment in place. A matching job summary appears in the Actions tab. Fork PRs with read-only tokens get a logged skip, not a silent failure.
+
+**`require_reviewer` enforced in CI.** Set `require_reviewer: @alice` in `.vibesafe` and the CI script checks GitHub's reviewer API — if the named reviewer hasn't been added, the check fails. Only runs when `GH_TOKEN` and `PR_NUMBER` are available; skips with a warning otherwise.
 
 **Agentic remediation.** COMMIT mode fixes what's fixable instead of just flagging:
 
@@ -220,6 +225,28 @@ Five additional mode tests passed: BEFORE (main-branch stop), CONFLICT (auth fil
 | All 5 pre-existing checks (main, credential, test skip, XSS, eval) | BLOCK | ✅ no regressions |
 
 **20/20 tests passed.** `.env.example` template files excluded from Danger Zone (they're meant to be committed). Block pattern exemption verified per-file, not per-content-line.
+
+**v1.8.1 CI script tests (15 tests, automated):** CI script tested with bare-repo-as-origin harness (enables `git fetch`/`git diff origin/main...HEAD` without network):
+
+| Scenario | Expected | Result |
+|----------|----------|--------|
+| Credential in tracked file | BLOCK | ✅ caught |
+| Test bypass `.skip()` | BLOCK | ✅ caught |
+| XSS sink `innerHTML =` | BLOCK | ✅ caught |
+| `eval()` added | BLOCK | ✅ caught |
+| `process.env.NEW_KEY` without `.env.example` | BLOCK | ✅ caught (upgraded from warn to fail) |
+| `process.env.NEW_KEY` with `.env.example` | pass | ✅ passed |
+| `.env.example` staged alone | pass (warns) | ✅ passed |
+| Migration without `down()`, no contract | pass (warns) | ✅ passed |
+| Migration without `down()`, `require_migration_rollback: true` | BLOCK | ✅ caught |
+| Source file, `require_tests: true`, no test file | BLOCK | ✅ caught |
+| Source + test file, `require_tests: true` | pass | ✅ passed |
+| `block_pattern: TODO` in source | BLOCK | ✅ caught |
+| `block_pattern: TODO` in test file | pass | ✅ exempt (per-file check, `.vibesafe` itself excluded) |
+| `max_changed_files: 2`, 3 files changed | pass (warns) | ✅ warned, didn't fail |
+| Clean change | pass | ✅ passed |
+
+**15/15 tests passed.** Two bugs fixed during CI test authoring: env drift upgraded from warn to fail (parity with hook), block_pattern false positive when `.vibesafe` itself contains the blocked pattern.
 
 ---
 
