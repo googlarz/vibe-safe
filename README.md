@@ -53,14 +53,22 @@ Run this before you commit. It reads your actual git state, not what you assume 
 git clone https://github.com/googlarz/vibe-safe ~/.claude/skills/vibe-safe
 ```
 
-**Install the pre-commit hook in each repo you work in:**
+**Install the pre-commit hook** (runs locally on every `git commit`):
 
 ```bash
 cp ~/.claude/skills/vibe-safe/hooks/pre-commit .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
-Or just run `vibe-safe` — BEFORE mode installs it automatically.
+**Install CI integration** (runs in GitHub Actions — catches `--no-verify` bypasses):
+
+```bash
+mkdir -p .github/vibe-safe .github/workflows
+cp ~/.claude/skills/vibe-safe/ci/vibe-safe-ci.sh .github/vibe-safe/
+cp ~/.claude/skills/vibe-safe/ci/workflow.yml .github/workflows/vibe-safe.yml
+```
+
+Or just run `vibe-safe` — BEFORE mode installs both automatically.
 
 ---
 
@@ -75,9 +83,12 @@ Unstaged changes present                  → REVIEW mode
 Commits ahead of main, about to open PR  → PR mode
 Conflict markers in any file             → CONFLICT mode
 Claude proposed something that feels big → ALARM mode
+"what does this flag mean?"              → EXPLAIN mode
+Developer reviewing a vibe-coded PR      → REVIEWER mode
+Checking whether past commits are clean  → HISTORY mode
 ```
 
-Or invoke directly: `vibe-safe commit` / `vibe-safe before` / etc.
+Or invoke directly: `vibe-safe commit` / `vibe-safe explain ssl` / `vibe-safe reviewer` / etc.
 
 After any session: `vibe-safe verify` — confirms the session is clean before you walk away.
 
@@ -88,6 +99,8 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 **Active, not passive.** Claude runs the actual shell commands — `git diff`, `git grep`, `git branch` — and reports what it finds. You don't fill out a form.
 
 **Pre-commit hook runs without Claude.** BEFORE mode installs `hooks/pre-commit` into `.git/hooks/pre-commit`. From then on, 21 mechanical checks run on every `git commit` whether or not you remember to invoke the skill. Branch check, credential scan, Danger Zone audit, suppression patterns, security sinks, private key files — all in pure shell.
+
+**CI integration closes the bypass gap.** The hook can be skipped with `git commit --no-verify`. The GitHub Actions workflow cannot. BEFORE mode also installs `ci/vibe-safe-ci.sh` + `ci/workflow.yml` — the same checks run on every push and PR, with GitHub annotations for each finding. `--no-verify` is auto-escalated to ALARM if Claude proposes it.
 
 **Agentic remediation.** COMMIT mode fixes what's fixable instead of just flagging:
 
@@ -127,10 +140,19 @@ Reads `git diff main...HEAD`, asks why you're making the change, generates a com
 Reads conflict markers and explains both sides in plain English — what the current version does, what your change does, what's specifically lost if you accept either side. Never recommends "accept all theirs/ours." Danger Zone file in conflict → STOP — CALL A DEVELOPER.
 
 ### ALARM
-When Claude proposes something that feels big. Assesses reversibility, shared-infra impact, and whether a developer would expect to review this. Auto-escalates for: `git push --force`, direct database commands, CI check bypasses. Output: **GO AHEAD / PAUSE AND CHECK / STOP — CALL A DEVELOPER**.
+When Claude proposes something that feels big. Assesses reversibility, shared-infra impact, and whether a developer would expect to review this. Auto-escalates for: `git push --force`, `git commit --no-verify`, direct database commands, CI check bypasses. Output: **GO AHEAD / PAUSE AND CHECK / STOP — CALL A DEVELOPER**.
 
 ### VERIFY
 Post-session clean check. Runs branch check, full file list for the PR, credential sweep, and commit message audit. Output: **CLEAN** or remaining flags with file:line evidence.
+
+### HISTORY
+Scans recent git history for past mistakes needing active remediation. Finds commits that added credential patterns (even if later "deleted"), suspicious commit messages hinting at cleanup attempts, and recently deleted files. Distinguishes **active exposure** (still in HEAD) from **historical exposure** (removed but still in history — key rotation + `git filter-repo` required). Includes exact remediation steps.
+
+### EXPLAIN
+Deep plain-English explanation of any vibe-safe flag. `vibe-safe explain ssl` tells you what SSL verification is, why disabling it is dangerous, what it looks like when it goes wrong, what Claude should have done instead, and one sentence you can say to your developer. For when "flagged" isn't enough and you want to actually understand it.
+
+### REVIEWER
+For developers reviewing a PR opened by a non-technical contributor. Reads the full diff and produces: what the PM intended, what actually changed, which vibe-safe patterns are present, what to specifically test, and questions to ask if intent and implementation don't match.
 
 ---
 

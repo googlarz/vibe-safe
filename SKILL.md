@@ -22,9 +22,12 @@ git diff HEAD has unstaged changes → REVIEW mode
 commits ahead of main, ready to open PR → PR mode
 conflict markers in any file → CONFLICT mode
 Claude just proposed something that feels big → ALARM mode
+"what does this flag mean?" / need deeper explanation → EXPLAIN mode
+developer reviewing a vibe-coded PR → REVIEWER mode
+checking whether past commits contain mistakes → HISTORY mode
 ```
 
-Or invoke directly: `vibe-safe before / review / commit / pr / conflict / alarm`
+Or invoke directly: `vibe-safe before / review / commit / pr / conflict / alarm / history / explain / reviewer`
 
 ---
 
@@ -58,7 +61,8 @@ Claude runs:
 
 1. **Scoped prompt** — limits what files Claude is allowed to touch. Use it verbatim.
 2. **Hook installation** — if no pre-commit hook exists, Claude copies `~/.claude/skills/vibe-safe/hooks/pre-commit` to `.git/hooks/pre-commit` and makes it executable. This hook runs branch + credential + Danger Zone checks on every future `git commit`, without requiring you to remember vibe-safe.
-3. **`.vibesafe` generation** — if no `.vibesafe` exists, Claude asks:
+3. **CI installation** — if no `.github/workflows/vibe-safe.yml` exists, Claude copies `ci/vibe-safe-ci.sh` to `.github/vibe-safe/` and `ci/workflow.yml` to `.github/workflows/vibe-safe.yml`. This runs the same checks in GitHub Actions on every push and PR — closing the `git commit --no-verify` bypass gap. The hook can be skipped; CI cannot.
+4. **`.vibesafe` generation** — if no `.vibesafe` exists, Claude asks:
    - "What parts of this codebase should a developer always be consulted on?"
    - "What areas are definitely yours to edit freely (copy, images, marketing)?"
    Then writes the file and shows you what to commit.
@@ -254,8 +258,58 @@ Output: **GO AHEAD / PAUSE AND CHECK / STOP — CALL A DEVELOPER**
 
 **Auto-escalate to ALARM — no questions needed:**
 - Claude proposes `git push --force` or `git push -f` for any reason
+- Claude proposes `git commit --no-verify` for any reason — this skips all 21 hook checks
 - Claude proposes running a direct database command (`psql`, `rails db:`, `knex migrate`)
 - Claude proposes modifying `.github/workflows/` to skip a failing check
+
+---
+
+## Mode: HISTORY
+
+Scans recent git history for past mistakes that need active remediation — not just the current state.
+
+Claude runs:
+- `git log -S "sk-|pk_|ghp_|AKIA|api_key|secret|password" --oneline -50` — finds commits that added or removed credential patterns. A key "deleted" in commit B is still readable in commit A.
+- `git log --grep="fix\|remove\|revert\|oops\|secret\|key\|credential\|token" --oneline -20` — finds commits whose messages hint at past cleanup attempts
+- `git log --diff-filter=D --name-only --format="" -30` — finds files deleted in recent commits (possible sensitive data removal)
+
+For each flagged commit, Claude distinguishes:
+- **Active exposure** — credential still present in HEAD (STOP: rotate immediately)
+- **Historical exposure** — removed in a later commit but still readable in history (requires key rotation + `git filter-repo` to scrub, plus force-push and re-clone for all team members)
+- **Likely clean** — no pattern found
+
+Historical exposure output includes exact remediation steps: rotate the key, run `git filter-repo`, force-push, notify anyone who cloned.
+
+---
+
+## Mode: EXPLAIN
+
+When a vibe-safe flag fires and you don't understand what it means or what to do about it.
+
+Invoke: `vibe-safe explain <topic>` — e.g., `vibe-safe explain credential`, `vibe-safe explain ssl`, `vibe-safe explain ts-ignore`, `vibe-safe explain empty catch`
+
+Claude provides:
+- **What it is** — plain English, no jargon
+- **Why it matters** — concrete worst-case scenario in non-technical terms
+- **What it looks like when it goes wrong** — a real example
+- **The proper fix** — not just "don't do this" but what Claude should have done instead
+- **One sentence for your developer** — how to communicate the risk without needing to explain the full technical detail yourself
+
+---
+
+## Mode: REVIEWER
+
+For developers reviewing a pull request opened by a non-technical contributor.
+
+Claude reads `git diff main...HEAD` and produces a developer-facing summary:
+
+- **What the PM intended** — derived from branch name, commit messages, and file scope
+- **What actually changed** — file-by-file summary in developer language
+- **Risk surface** — which vibe-safe patterns are present in the diff, ranked by severity
+- **What to specifically test** — derived from changed logic paths, file types, and risk level
+- **Questions to ask the PM** — if stated intent and actual diff don't match, surfaces the discrepancy
+
+Invoke as the developer before approving a PR: `vibe-safe reviewer`
 
 ---
 
@@ -325,6 +379,8 @@ Files that need developer involvement regardless of change size:
 | "That code was probably dead anyway" | Commented-out code means Claude wasn't sure — don't ship uncertainty |
 | "The rm -rf is scoped to a temp dir" | Verify that before it runs in CI against a production path |
 | "throw is throw, same thing" | String throws lose the stack trace — production bugs become invisible |
+| "The hook keeps failing so I'll use --no-verify" | Skipping the hook skips all 21 checks — find out why it's failing instead |
+| "It's fine, I checked git history and deleted it" | Deleted ≠ gone — run HISTORY mode to confirm and get remediation steps |
 
 ---
 

@@ -1,0 +1,24 @@
+name: vibe-safe
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  vibe-safe:
+    name: Safety checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run vibe-safe checks
+        env:
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
+        run: sh .github/vibe-safe/vibe-safe-ci.sh
