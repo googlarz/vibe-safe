@@ -115,40 +115,44 @@ Claude runs:
    require_reviewer: @alice          # top committer in src/
    ```
 
-   **2. A questionnaire to paste into Slack or email** — for anything that can't be inferred from the repo:
+   **2. A single document to paste into Slack or email** — discovered rules shown inline for confirmation, open questions below:
 
    ```
-   Hi — I'm setting up a safety tool before I commit code. Quick questions:
+   Hi — setting up a safety tool before I commit code.
+   Can you confirm what I found and answer a few questions?
 
-   1. Are there folders I should never touch without checking with you first?
-      (already flagged: migrations/, src/auth/ — anything else?)
+   FOUND IN REPO — confirm or adjust:
+
+   ✅ require_tests — found 47 test files
+      Keep? Yes / No / Only for: ___
+
+   ✅ max_changed_files: 12 — avg 7 files per commit in git history
+      Keep 12? Yes / Lower to: ___
+
+   ✅ require_migration_rollback — all 3 existing migrations have a down()
+      Keep? Yes / No
+
+   ✅ block_pattern: TODO — only 2 TODOs in entire codebase
+      Keep? Yes / No / Add more blocked terms: ___
+
+   ✅ require_reviewer: @alice — top committer across src/
+      Right person? Yes / Change to: ___
+
+   NEED YOUR INPUT:
+
+   1. Any folders I should never touch without you?
+      (already flagging: migrations/, src/auth/ — anything else?)
       →
 
-   2. What areas are definitely mine to edit freely?
+   2. Areas that are definitely mine to edit freely?
       (e.g. marketing copy, images, public/)
       →
 
-   3. Should every code change include updated tests?
-      Yes / No / Only for: ___
-      →
-
-   4. Max files in one commit — does 12 sound right based on your team norms?
-      Keep it / change to: ___
-      →
-
-   5. Who should review my PRs?
-      (we see @alice commits most — is that right?)
-      →
-
-   6. Any terms that should never appear in committed code?
-      (e.g. TODO, console.log, hardcoded IPs)
-      →
-
-   7. Anything else I should know before I start committing?
+   3. Anything else I should know before I start committing?
       →
    ```
 
-   PM sends the questionnaire, pastes the answers back. Claude merges discovery + answers into the final `.vibesafe`, shows a plain-English diff of what changed from the draft ("added src/billing/ as danger zone, changed max files from 12 to 8"). Nothing written to disk until confirmed.
+   PM sends, pastes answers back. Claude merges discovery + answers into final `.vibesafe`, shows plain-English diff ("added src/billing/ as danger zone, lowered max files from 12 to 8"). Nothing written until confirmed.
 
 ---
 
