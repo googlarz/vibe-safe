@@ -38,7 +38,7 @@ STAGED_FILES=$(git diff --cached --name-only 2>/dev/null)
 DANGER=""
 for f in $STAGED_FILES; do
   case "$f" in
-    .env|.env.*|*.conf|Dockerfile|docker-compose*|\
+    .env|.env.local|.env.production|.env.staging|.env.development|*.conf|Dockerfile|docker-compose*|\
     .github/workflows/*|Jenkinsfile|.circleci/*|.gitlab-ci.yml|\
     */migrations/*|*/schema/*|*.sql|\
     webpack.config.*|vite.config.*|tsconfig.json|\
@@ -262,7 +262,10 @@ if [ -f ".vibesafe" ]; then
   # max_changed_files (soft ceiling — warns and routes to SCOPE, does not hard block)
   MAX=$(grep "^max_changed_files:" .vibesafe 2>/dev/null | sed 's/.*:[[:space:]]*//' | head -1)
   if [ -n "$MAX" ]; then
-    FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "." 2>/dev/null || echo 0)
+    FILE_COUNT=0
+    if [ -n "$STAGED_FILES" ]; then
+      FILE_COUNT=$(echo "$STAGED_FILES" | wc -l | tr -d ' ')
+    fi
     if [ "$FILE_COUNT" -gt "$MAX" ]; then
       echo ""
       echo "vibe-safe: SCOPE WARNING -- $FILE_COUNT files staged, developer contract max is $MAX"
@@ -271,14 +274,23 @@ if [ -f ".vibesafe" ]; then
       echo ""
     fi
   fi
-  # block_pattern
+  # block_pattern — check per implementation file (skips test/md files)
   while IFS= read -r line; do
     case "$line" in
       block_pattern:*)
         PAT=$(echo "$line" | sed 's/^block_pattern:[[:space:]]*//')
-        # Only check implementation files, not test files or markdown
-        IMPL_ADDED=$(echo "$ADDED" | grep -v -iE "\.(md|txt)$|\.(test|spec)\.|__tests__" 2>/dev/null)
-        BLOCKED=$(echo "$IMPL_ADDED" | grep -F "$PAT" 2>/dev/null)
+        BLOCKED=""
+        for sf in $STAGED_FILES; do
+          case "$sf" in
+            *.test.*|*.spec.*|*__tests__*|*_test.*|*.md|*.txt) continue ;;
+          esac
+          FILE_ADDED=$(git diff --cached -- "$sf" 2>/dev/null | grep "^+" | grep -v "^+++" 2>/dev/null)
+          MATCH=$(echo "$FILE_ADDED" | grep -F "$PAT" 2>/dev/null)
+          if [ -n "$MATCH" ]; then
+            BLOCKED="${BLOCKED:+$BLOCKED
+}$sf: $MATCH"
+          fi
+        done
         if [ -n "$BLOCKED" ]; then
           bail "STOP -- Developer contract: blocked pattern '$PAT' found in added code" "$BLOCKED" \
             "Your team has blocked this pattern. Remove it before committing."

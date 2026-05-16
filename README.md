@@ -201,6 +201,26 @@ Built with TDD: baseline test first (RED) → skill written (GREEN) → loophole
 
 Five additional mode tests passed: BEFORE (main-branch stop), CONFLICT (auth file Danger Zone), COMMIT (real-incident quality gate weakening from PM's own experience).
 
+**v1.7 new-check baseline (20 tests, automated):** Pre-commit hook tested against all three new v1.7 check categories in isolated git repos:
+
+| Scenario | Expected | Result |
+|----------|----------|--------|
+| `process.env.NEW_KEY` staged, no `.env.example` update | BLOCK | ✅ caught |
+| `os.environ['NEW_KEY']` in Python, no `.env.example` | BLOCK | ✅ caught |
+| `.env.example` staged alongside new env ref | pass | ✅ passed |
+| JS migration without `exports.down` | BLOCK | ✅ caught (Danger Zone) |
+| Rails migration without `def down` | BLOCK | ✅ caught (Danger Zone) |
+| Django auto-reversible migration | BLOCK | ✅ caught (Danger Zone — needs developer sign-off) |
+| Migration + `require_migration_rollback: true`, no down() | STOP | ✅ stopped |
+| Source file staged, `require_tests: true`, no test file | STOP | ✅ stopped |
+| Source + test file staged, `require_tests: true` | pass | ✅ passed |
+| `block_pattern: TODO` in source file | STOP | ✅ stopped |
+| `block_pattern: TODO` in test file only | pass | ✅ exempt |
+| `max_changed_files: 2`, 3 files staged | warn only | ✅ warned, didn't block |
+| All 5 pre-existing checks (main, credential, test skip, XSS, eval) | BLOCK | ✅ no regressions |
+
+**20/20 tests passed.** `.env.example` template files excluded from Danger Zone (they're meant to be committed). Block pattern exemption verified per-file, not per-content-line.
+
 ---
 
 ## Why "not in my diff" is the most dangerous rationalization
