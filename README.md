@@ -8,7 +8,7 @@ Run this before you commit. It reads your actual git state, not what you assume 
 
 ---
 
-**28 risk categories. Every flag cites file:line. Claude reads the actual git state — nothing is self-reported.**
+**32 risk categories. Developer-defined contracts. Every flag cites file:line. Claude reads the actual git state — nothing is self-reported.**
 
 ---
 
@@ -44,6 +44,10 @@ Run this before you commit. It reads your actual git state, not what you assume 
 | Private key / cert file staged | No check | STOP — binary credential, text grep misses it |
 | `rm -rf` in committed script | No check | Flagged — destructive path without knowing prod layout |
 | `throw "string"` without Error | No check | Flagged — stack trace lost, bugs undiagnosable in production |
+| New env var, no `.env.example` update | No check | Flagged — next dev spinning up won't know to set it |
+| Migration with no rollback | No check | Flagged — schema change that can't be undone automatically |
+| New source code, no test changes | No check | Flagged (or hard-blocked via `require_tests`) |
+| Claude changed more files than asked | No check | SCOPE mode — intent vs diff, file-by-file verdict |
 
 ---
 
@@ -80,6 +84,7 @@ Just say `vibe-safe` — Claude auto-detects the right mode from your git state:
 No staged changes, describing a task      → BEFORE mode
 git diff --staged has content             → COMMIT mode
 Unstaged changes present                  → REVIEW mode
+"did Claude change more than I asked?"   → SCOPE mode
 Commits ahead of main, about to open PR  → PR mode
 Conflict markers in any file             → CONFLICT mode
 Claude proposed something that feels big → ALARM mode
@@ -98,7 +103,7 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 
 **Active, not passive.** Claude runs the actual shell commands — `git diff`, `git grep`, `git branch` — and reports what it finds. You don't fill out a form.
 
-**Pre-commit hook runs without Claude.** BEFORE mode installs `hooks/pre-commit` into `.git/hooks/pre-commit`. From then on, 21 mechanical checks run on every `git commit` whether or not you remember to invoke the skill. Branch check, credential scan, Danger Zone audit, suppression patterns, security sinks, private key files — all in pure shell.
+**Pre-commit hook runs without Claude.** BEFORE mode installs `hooks/pre-commit` into `.git/hooks/pre-commit`. From then on, 24 mechanical checks run on every `git commit` whether or not you remember to invoke the skill. Branch check, credential scan, Danger Zone audit, suppression patterns, security sinks, private key files, env var drift, migration rollback, developer contracts — all in pure shell.
 
 **CI integration closes the bypass gap.** The hook can be skipped with `git commit --no-verify`. The GitHub Actions workflow cannot. BEFORE mode also installs `ci/vibe-safe-ci.sh` + `ci/workflow.yml` — the same checks run on every push and PR, with GitHub annotations for each finding. `--no-verify` is auto-escalated to ALARM if Claude proposes it.
 
@@ -109,16 +114,24 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 | On `main`/`master` | `git checkout -b feature/[3-word-slug]`, then re-runs checks |
 | Credential in staged file | `git restore --staged <file>`, explains key must be rotated |
 | Danger Zone file staged | `git restore --staged <file>`, tells you what to ask a dev |
-| Out-of-scope file staged | `git restore --staged <file>` after your confirmation |
+| Out-of-scope or too many files staged | SCOPE audit — file-by-file verdict, `git restore` for anything unexpected |
 | All checks pass | Generates commit message, runs `git commit -m "..."` for you |
 
-**Repo-specific config.** BEFORE mode generates a `.vibesafe` file from two questions. Commit it once and every contributor — and the hook — gets the same custom danger/safe zones.
+**Developer-defined contracts.** The developer sets the rules once in `.vibesafe`. vibe-safe enforces them for every PM contribution — no code review nagging required.
 
 ```
 # .vibesafe
 danger_zone: src/payments/
 safe_zone: src/components/marketing/
+
+require_tests: true          # New source files must have test changes
+max_changed_files: 15        # Warn + SCOPE audit if exceeded
+require_migration_rollback: true  # All migrations need a down/rollback
+block_pattern: TODO          # Hard stop if TODO appears in implementation
+require_reviewer: @alice     # Added to every PR description
 ```
+
+Commit `.vibesafe` once. Every contributor — and the pre-commit hook and CI — gets the same rules automatically.
 
 ---
 
@@ -130,11 +143,14 @@ Runs before Claude writes anything. Checks your branch (creates a feature branch
 ### REVIEW
 After Claude writes code, before you commit. Runs `git diff HEAD` for unstaged changes **and** `git grep` across all tracked files for credential patterns. Credentials live in files you didn't intend to change and won't appear in your diff.
 
+### SCOPE
+When you think Claude changed more than you asked — or when `max_changed_files` fires. Claude asks what the original task was, then evaluates every changed file: **IN SCOPE / LIKELY NEEDED / SUSPICIOUS / OUT OF SCOPE**. Removes out-of-scope files with your confirmation.
+
 ### COMMIT
-28 checks across credentials, Danger Zones, code health, security patterns, and scope — each with remediation. When all pass: Claude generates the commit message and runs `git commit` for you.
+32 checks across credentials, Danger Zones, code health, security patterns, scope, env vars, migrations, and developer contracts — each with remediation. When all pass: Claude generates the commit message and runs `git commit` for you.
 
 ### PR
-Reads `git diff main...HEAD`, asks why you're making the change, generates a complete PR description with what changed, what to test, flagged uncertainties, and suggested reviewers from git log.
+Reads `git diff main...HEAD`, asks why you're making the change, generates a complete PR description with what changed, what to test, flagged uncertainties, and suggested reviewers. Appends a **PR safety artifact** — a table showing what vibe-safe verified — so the reviewer sees the evidence without asking.
 
 ### CONFLICT
 Reads conflict markers and explains both sides in plain English — what the current version does, what your change does, what's specifically lost if you accept either side. Never recommends "accept all theirs/ours." Danger Zone file in conflict → STOP — CALL A DEVELOPER.

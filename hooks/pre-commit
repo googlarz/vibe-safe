@@ -226,4 +226,76 @@ if [ -n "$JS_FILES" ]; then
   fi
 fi
 
-echo "vibe-safe: all 21 checks passed -- clear"
+# 22. .env.example drift
+ENV_REFS=$(echo "$ADDED" | grep -E "process\.env\.|os\.environ\[|getenv\(|import\.meta\.env\." 2>/dev/null)
+if [ -n "$ENV_REFS" ]; then
+  ENV_EXAMPLE_CHANGED=$(echo "$STAGED_FILES" | grep -E "^\.env\.example$|^\.env\.sample$" 2>/dev/null)
+  if [ -z "$ENV_EXAMPLE_CHANGED" ]; then
+    bail "PAUSE -- New env variable referenced without .env.example update:" "$ENV_REFS" \
+      "Other developers won't know to set this variable. Add it to .env.example first."
+  fi
+fi
+
+# 23. Migration rollback check
+MIGRATION_FILES=$(echo "$STAGED_FILES" | grep -E "migrations/|db/migrate/|_migration\." 2>/dev/null)
+REQ_ROLLBACK=$([ -f ".vibesafe" ] && grep "^require_migration_rollback:[[:space:]]*true" .vibesafe 2>/dev/null || true)
+if [ -n "$MIGRATION_FILES" ]; then
+  for mf in $MIGRATION_FILES; do
+    # Skip Django auto-reversible migrations
+    if grep -q "from django.db import migrations" "$mf" 2>/dev/null; then
+      continue
+    fi
+    if ! grep -qiE "def down|def downgrade|exports\.down|\.down\(|rollback\(|-- Down" "$mf" 2>/dev/null; then
+      if [ -n "$REQ_ROLLBACK" ]; then
+        bail "STOP -- Developer contract: migration without rollback: $mf" "" \
+          "Your team requires all migrations to include a down/downgrade/rollback. Add one before committing."
+      else
+        bail "PAUSE -- Migration without rollback: $mf" "" \
+          "This schema change cannot be undone automatically. Add a down() or rollback function. Run: vibe-safe commit"
+      fi
+    fi
+  done
+fi
+
+# 24. Developer contracts from .vibesafe
+if [ -f ".vibesafe" ]; then
+  # max_changed_files (soft ceiling — warns and routes to SCOPE, does not hard block)
+  MAX=$(grep "^max_changed_files:" .vibesafe 2>/dev/null | sed 's/.*:[[:space:]]*//' | head -1)
+  if [ -n "$MAX" ]; then
+    FILE_COUNT=$(echo "$STAGED_FILES" | grep -c "." 2>/dev/null || echo 0)
+    if [ "$FILE_COUNT" -gt "$MAX" ]; then
+      echo ""
+      echo "vibe-safe: SCOPE WARNING -- $FILE_COUNT files staged, developer contract max is $MAX"
+      echo "  Run: vibe-safe scope"
+      echo "  Unexpected files may have been changed by Claude. Review before committing."
+      echo ""
+    fi
+  fi
+  # block_pattern
+  while IFS= read -r line; do
+    case "$line" in
+      block_pattern:*)
+        PAT=$(echo "$line" | sed 's/^block_pattern:[[:space:]]*//')
+        # Only check implementation files, not test files or markdown
+        IMPL_ADDED=$(echo "$ADDED" | grep -v -iE "\.(md|txt)$|\.(test|spec)\.|__tests__" 2>/dev/null)
+        BLOCKED=$(echo "$IMPL_ADDED" | grep -F "$PAT" 2>/dev/null)
+        if [ -n "$BLOCKED" ]; then
+          bail "STOP -- Developer contract: blocked pattern '$PAT' found in added code" "$BLOCKED" \
+            "Your team has blocked this pattern. Remove it before committing."
+        fi
+        ;;
+    esac
+  done < .vibesafe
+  # require_tests (enforced only when source files are staged)
+  REQ_TESTS=$(grep "^require_tests:[[:space:]]*true" .vibesafe 2>/dev/null)
+  if [ -n "$REQ_TESTS" ]; then
+    SRC_FILES=$(echo "$STAGED_FILES" | grep -E "\.(js|ts|jsx|tsx|py|rb|go|rs|java|cs)$" | grep -v -E "\.(test|spec)\.|_test\." 2>/dev/null)
+    TEST_FILES=$(echo "$STAGED_FILES" | grep -E "\.(test|spec)\.|_test\.|/tests/|/__tests__/" 2>/dev/null)
+    if [ -n "$SRC_FILES" ] && [ -z "$TEST_FILES" ]; then
+      bail "STOP -- Developer contract: require_tests=true, no test files staged" "$SRC_FILES" \
+        "Your team requires test changes alongside source changes. Add or update tests. Run: vibe-safe commit"
+    fi
+  fi
+fi
+
+echo "vibe-safe: all 24 checks passed -- clear"

@@ -141,6 +141,68 @@ if [ -n "$QUALITY_CHANGES" ]; then
   [ -n "$THRESHOLD_DROP" ] && warn "Numeric value decreased in quality config — check for threshold lowering" "$THRESHOLD_DROP"
 fi
 
+# 17. .env.example drift
+ENV_REFS=$(echo "$ADDED" | grep -E "process\.env\.|os\.environ\[|getenv\(|import\.meta\.env\." 2>/dev/null)
+if [ -n "$ENV_REFS" ]; then
+  ENV_EXAMPLE_CHANGED=$(echo "$CHANGED_FILES" | grep -E "^\.env\.example$|^\.env\.sample$" 2>/dev/null)
+  if [ -z "$ENV_EXAMPLE_CHANGED" ]; then
+    warn "New env variable referenced without .env.example update" "$ENV_REFS"
+  fi
+fi
+
+# 18. Migration rollback check
+MIGRATION_FILES=$(echo "$CHANGED_FILES" | grep -E "migrations/|db/migrate/|_migration\." 2>/dev/null)
+REQ_ROLLBACK=$([ -f ".vibesafe" ] && grep "^require_migration_rollback:[[:space:]]*true" .vibesafe 2>/dev/null || true)
+if [ -n "$MIGRATION_FILES" ]; then
+  for mf in $MIGRATION_FILES; do
+    if grep -q "from django.db import migrations" "$mf" 2>/dev/null; then
+      continue
+    fi
+    if ! grep -qiE "def down|def downgrade|exports\.down|\.down\(|rollback\(|-- Down" "$mf" 2>/dev/null; then
+      if [ -n "$REQ_ROLLBACK" ]; then
+        fail "STOP — developer contract: migration without rollback" "$mf" \
+          "Team requires all migrations to include a down/downgrade/rollback function."
+      else
+        warn "Migration without rollback — schema change cannot be undone automatically" "$mf"
+      fi
+    fi
+  done
+fi
+
+# 19. Developer contracts from .vibesafe
+if [ -f ".vibesafe" ]; then
+  # max_changed_files
+  MAX=$(grep "^max_changed_files:" .vibesafe 2>/dev/null | sed 's/.*:[[:space:]]*//' | head -1)
+  if [ -n "$MAX" ]; then
+    FILE_COUNT=$(echo "$CHANGED_FILES" | grep -c "." 2>/dev/null || echo 0)
+    if [ "$FILE_COUNT" -gt "$MAX" ]; then
+      warn "Developer contract: max_changed_files=$MAX exceeded ($FILE_COUNT files changed)" "$CHANGED_FILES"
+    fi
+  fi
+  # block_pattern
+  while IFS= read -r line; do
+    case "$line" in
+      block_pattern:*)
+        PAT=$(echo "$line" | sed 's/^block_pattern:[[:space:]]*//')
+        IMPL_ADDED=$(echo "$ADDED" | grep -v -iE "\.(md|txt)$|\.(test|spec)\.|__tests__" 2>/dev/null)
+        BLOCKED=$(echo "$IMPL_ADDED" | grep -F "$PAT" 2>/dev/null)
+        [ -n "$BLOCKED" ] && fail "STOP — developer contract: blocked pattern '$PAT' in added code" "$BLOCKED" \
+          "Team has blocked this pattern. Remove it before merging."
+        ;;
+    esac
+  done < .vibesafe
+  # require_tests
+  REQ_TESTS=$(grep "^require_tests:[[:space:]]*true" .vibesafe 2>/dev/null)
+  if [ -n "$REQ_TESTS" ]; then
+    SRC_FILES=$(echo "$CHANGED_FILES" | grep -E "\.(js|ts|jsx|tsx|py|rb|go|rs|java|cs)$" | grep -v -E "\.(test|spec)\.|_test\." 2>/dev/null)
+    TEST_FILES=$(echo "$CHANGED_FILES" | grep -E "\.(test|spec)\.|_test\.|/tests/|/__tests__/" 2>/dev/null)
+    if [ -n "$SRC_FILES" ] && [ -z "$TEST_FILES" ]; then
+      fail "STOP — developer contract: require_tests=true, no test files in PR" "$SRC_FILES" \
+        "Team requires test changes alongside source changes."
+    fi
+  fi
+fi
+
 echo ""
 if [ "$FAILED" = "1" ]; then
   echo "vibe-safe: FAILED — fix the issues above before merging"
