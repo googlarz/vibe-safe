@@ -302,6 +302,41 @@ Five additional mode tests passed: BEFORE (main-branch stop), CONFLICT (auth fil
 
 ---
 
+## What vibe-safe can't catch — and how to handle it
+
+Three categories of risk that grep cannot cover.
+
+### API response data exposure
+
+**Why not catchable:** Whether a response leaks sensitive fields depends on what the serializer includes — that requires understanding the data model, not reading diffs.
+
+**How to handle:**
+- **Use allowlist serializers, not raw model returns.** `return await db.user.findFirst(...)` directly in a route handler is the root cause. Fix with a schema that explicitly names exposed fields: `response_model=UserPublic` (FastAPI), `fields = ['id', 'name']` (DRF), `as_json(only: [:id, :name])` (Rails), `select: { id: true }` (Prisma).
+- **Runtime scan on staging.** [OWASP ZAP](https://www.zaproxy.org/) (free) or Burp Suite. Check that `password_hash`, `stripe_customer_id`, `ssn`, `internal_id` don't appear in responses before launch.
+- **Add a response shape test.** Assert which fields appear and fail if new ones are added without review.
+
+### Privacy policy
+
+**Why not catchable:** Whether you need one depends on what data you collect, where your users are, and applicable law — none of which are in the code.
+
+**How to handle:**
+- **The trigger is collecting personal data, not shipping code.** `email`, `name`, `phone`, `ip_address`, `location`, `device_id`, `date_of_birth`, behavioral tracking — any of these mean you need a policy before real users.
+- **Jurisdiction:** GDPR for EU/EEA users, CCPA for California users (>$25M revenue, >50k users, or >50% revenue from selling data), UK GDPR post-Brexit.
+- **Fast path:** [iubenda](https://www.iubenda.com), [Termly](https://termly.io), or [GetTerms.io](https://getterms.io) — ~$10/month, compliant output. Don't write your own or copy from another site.
+- **Developer action before adding any PII field:** document purpose, retention period, and who has access.
+
+### Data storage architecture
+
+**Why not catchable:** Where data ends up, who can access it, and whether it's encrypted requires understanding infrastructure — not reading diffs.
+
+**How to handle:**
+- **Four questions before building any new data entity:** Where is it stored? Who can read it? How long is it kept? Is it encrypted at rest? If you can't answer these, the feature isn't ready to build.
+- **Logs are a data store.** Whatever goes into `console.log`, `logger.info`, or your observability platform (Datadog, Sentry, CloudWatch) is stored, queryable, retained for months. Treat log destinations with the same access controls as your database.
+- **Third-party SDKs are data stores.** Segment, Mixpanel, Intercom, Sentry, FullStory — adding any of these sends user data to their infrastructure. Check what each collects by default, whether PII can be excluded, and whether their DPA covers your jurisdiction.
+- **Gate question before any new integration:** "Does this send user data off our infrastructure? What data, to whom, under what terms?" Answer this before the SDK lands in `package.json`.
+
+---
+
 ## Why "not in my diff" is the most dangerous rationalization
 
 Credentials live in files you didn't intend to change. If you scan only staged files, you miss them. vibe-safe runs `git grep` across **all tracked files** in every REVIEW and COMMIT check — the same command that catches a secret committed three weeks ago in a different session.
