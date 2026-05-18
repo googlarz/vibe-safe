@@ -300,6 +300,21 @@ Five additional mode tests passed: BEFORE (main-branch stop), CONFLICT (auth fil
 
 **10/10 tests passed.** Optional tooling (gitleaks, semgrep, npm audit) fails gracefully when not installed — same checks still run via grep.
 
+**v1.10.0 expansion verification (25/25 hook, 20/20 CI, automated):** Coverage threshold detection, developer contracts, false positive tuning, and GitLab/Bitbucket CI support tested across both scripts. All pre-existing checks preserved. Hook test count grew from 20→25; CI test count grew from 15→20.
+
+**v1.10.4 new security checks (29/29 hook, 24/24 CI, automated):** Four new checks added and verified:
+
+| Scenario | Expected | Result |
+|----------|----------|--------|
+| API key literal in `src/config.ts` (frontend path) | STOP | ✅ caught (hook + CI) |
+| API key literal in `util.ts` (non-frontend path) | pass | ✅ not a false positive |
+| `logger.info('user token:', userToken)` in `dashboard.ts` | pass (warns) | ✅ soft flag only |
+| Insecure CSP `unsafe-eval` header | pass (warns) | ✅ soft flag only |
+| New `app.post()` route without rate limiting | pass (warns) | ✅ soft flag only |
+| All pre-existing checks (24/24 CI, 25/25 hook) | no regressions | ✅ all passing |
+
+**29/29 hook tests passed, 24/24 CI tests passed.** `auth.ts` basename detection confirmed: files in auth/security namespace still hit Danger Zone before check 32; `logger.info` (backend logging pattern) correctly reaches check 32 and soft-flags without blocking.
+
 ---
 
 ## What vibe-safe can't catch — and how to handle it
