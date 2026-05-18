@@ -364,4 +364,45 @@ COV_DROP=$(echo "$STAGED_DIFF" | grep "^-" | grep -v "^---" | grep -E "\-\-cov-f
 [ -n "$COV_DROP" ] && echo "vibe-safe: coverage threshold lowered -- verify this wasn't done to make CI pass
 $COV_DROP"
 
-echo "vibe-safe: all 30 checks passed -- clear"
+# 31. API key committed in client-side / frontend file (visible in browser)
+FRONTEND_CRED=""
+for f in $STAGED_FILES; do
+  case "$f" in
+    src/*|frontend/*|public/*|static/*|client/*|components/*|pages/*|app/*)
+      FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+      MATCH=$(echo "$FILE_ADDED" | grep -E "sk-[a-zA-Z0-9]{20,}|pk_live_|pk_test_|AKIA[A-Z0-9]{16}|api[_-]?key[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9_\-]{16,}" 2>/dev/null)
+      [ -n "$MATCH" ] && FRONTEND_CRED="${FRONTEND_CRED:+$FRONTEND_CRED
+}$f: $MATCH"
+      ;;
+  esac
+done
+[ -n "$FRONTEND_CRED" ] && bail "STOP -- credential in client-side file: visible to anyone who opens DevTools" "$FRONTEND_CRED" \
+  "Move to a server-side environment variable or route the call through a backend proxy."
+
+# 32. Sensitive data in log statements
+SECRET_LOG=$(echo "$ADDED" | grep -E "console\.(log|error|warn|info)\(|logger\.(info|debug|error|warn)\(|print\(|logging\.(info|debug|error|warning)\(" 2>/dev/null | grep -iE "password|secret|token|api.?key|private.?key|credential|auth" 2>/dev/null)
+[ -n "$SECRET_LOG" ] && echo "vibe-safe: possible sensitive data in log output -- scrub before production
+$SECRET_LOG"
+
+# 33. Security header regression
+HELMET_REMOVED=$(echo "$STAGED_DIFF" | grep "^-" | grep -v "^---" | grep -E "helmet\(\)|require.*['\"]helmet['\"]|import.*['\"]helmet['\"]" 2>/dev/null)
+[ -n "$HELMET_REMOVED" ] && echo "vibe-safe: helmet removed -- verify security headers are still set elsewhere
+$HELMET_REMOVED"
+INSECURE_HDR=$(echo "$ADDED" | grep -iE "content-security-policy.*unsafe-eval|content-security-policy.*unsafe-inline|x-frame-options.*ALLOW-FROM|strict-transport-security.*max-age=0" 2>/dev/null)
+[ -n "$INSECURE_HDR" ] && echo "vibe-safe: insecure security header configuration
+$INSECURE_HDR"
+
+# 34. New API route without rate limiting
+for f in $STAGED_FILES; do
+  case "$f" in *.js|*.ts|*.jsx|*.tsx|*.py|*.rb) ;;
+    *) continue ;;
+  esac
+  FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+  NEW_ROUTES=$(echo "$FILE_ADDED" | grep -E "app\.(get|post|put|delete|patch)\(|router\.(get|post|put|delete|patch)\(|@app\.route\(|@router\.(get|post|put|delete)\(" 2>/dev/null)
+  if [ -n "$NEW_ROUTES" ]; then
+    HAS_RATE=$(grep -E "rateLimit|rate_limit|throttle|slowapi|limiter|RateLimit|express-rate-limit|django-ratelimit" "$f" 2>/dev/null)
+    [ -z "$HAS_RATE" ] && echo "vibe-safe: new route in $f has no rate limiting -- add before exposing to traffic"
+  fi
+done
+
+echo "vibe-safe: all 34 checks passed -- clear"

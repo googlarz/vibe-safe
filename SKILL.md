@@ -475,6 +475,18 @@ Five automated checks, each with remediation:
     - Not installed → silently skip
     - Installed + high/critical CVE found → **STOP**: "npm audit found [N] high/critical vulnerabilities — review before committing"
 
+41. **API key in client-side file** — credential patterns (`sk-*`, `pk_live_`, `AKIA*`, `api_key=`) in files under `src/`, `frontend/`, `public/`, `static/`, `client/`, `components/`, `pages/`, `app/`
+    - Found → **STOP**: "Credential in client-side file — visible to anyone who opens DevTools. Move to a server-side environment variable or backend proxy."
+
+42. **Sensitive data in log statements** — `console.log(`, `logger.info(`, `print(`, `logging.debug(` on lines that also reference `password`, `secret`, `token`, `api_key`, `credential`, `auth`
+    - Found → flag: "Possible sensitive data in log output — scrub before production"
+
+43. **Security header regression** — `helmet` import removed from a server file, or explicit insecure header config added (`Content-Security-Policy: unsafe-eval`, `X-Frame-Options: ALLOW-FROM`, `Strict-Transport-Security: max-age=0`)
+    - Found → flag: "Security middleware removed or insecure header configured"
+
+44. **New route without rate limiting** — `app.get(`, `app.post(`, `@app.route(`, `@router.get(` added in a file with no `rateLimit`, `throttle`, `slowapi`, `limiter`, `RateLimit` reference anywhere in the file
+    - Found → flag: "New endpoint has no rate limiting — add before exposing to traffic"
+
 **When all checks pass:** Claude generates the commit message from the diff + your one-line description. You confirm or edit, then Claude runs `git commit -m "..."` for you.
 
 ---
