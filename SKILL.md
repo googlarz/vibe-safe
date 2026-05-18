@@ -171,7 +171,7 @@ Claude runs:
    **Rule 5 — Requested rule beyond vibe-safe's capability. Be honest, offer what's possible.**
    If the PM asks for a rule vibe-safe can't mechanically enforce, say so and offer the closest thing:
    - "TODO only allowed behind a feature flag" → "I can't check for feature flags automatically — that requires code understanding, not grep. I can hard-block TODO everywhere in implementation files, which means Claude must not write TODOs at all. Your developer would verify the feature-flag rule in code review. Block TODO everywhere? Yes / No"
-   - "tests must maintain coverage" → "I can enforce that every source change includes a test file in the PR (presence), but I can't measure coverage — that's your CI pipeline's job (codecov, pytest-cov, etc.). I'll enforce test presence; make sure your CI gates on coverage separately. Sound right? Yes / No"
+   - "tests must maintain coverage" → "Two separate things: I can enforce that every source change includes a test file in the PR (presence). I can't measure live coverage — that's your CI pipeline's job (`--cov-fail-under=N`, codecov, etc.). But if Claude lowers that threshold to make CI pass, I will catch that — same as I catch jest/codecov threshold drops. So: I enforce test presence in PRs, your CI enforces the coverage floor, and I guard against the floor being quietly lowered. Sound right? Yes / No"
 
    **Rule 6 — Jargon the PM doesn't recognize. Explain before proceeding.**
    If a question uses technical terms and the PM responds with "what does that mean?" or equivalent confusion, explain it in one sentence before asking again:
@@ -306,7 +306,8 @@ Five automated checks, each with remediation:
 
 2. **Danger Zone audit** — staged files vs. default list + `.vibesafe` custom zones
    - Danger Zone file staged → Claude runs `git restore --staged <file>` and tells you what to ask a developer to apply instead
-   - Quality gate file staged → Claude reads the diff and checks whether any numeric threshold decreased: `git diff --cached <file> | grep -E "^\-.*[0-9]"`. If a number dropped (coverage %, error limit, score floor), flag as **quality gate weakening**: "Claude may have fixed the failing check by lowering the bar, not by fixing the code."
+   - Quality gate file staged (`jest.config.*`, `vitest.config.*`, `codecov.yml`, `.nycrc`, `pytest.ini`, `setup.cfg`, `pyproject.toml`, `.coveragerc`, `sonar-project.properties`) → Claude reads the diff and checks whether any numeric threshold decreased. If a number dropped (coverage %, error limit, score floor), flag as **quality gate weakening**: "Claude may have fixed the failing check by lowering the bar, not by fixing the code."
+   - `--cov-fail-under` drop in ANY changed file (including CI YAML, `Makefile`, `tox.ini`) → same flag. This catches coverage thresholds living in workflow files rather than pytest config.
 
 3. **Deletion audit** — any files being removed?
    - File deleted → flag: "Claude may be wrong that this is unused. Confirm with a developer before this commit."

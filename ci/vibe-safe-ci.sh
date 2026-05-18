@@ -192,11 +192,15 @@ if [ -n "$JS_CHANGES" ]; then
 fi
 
 # 16. Quality gate weakening
-QUALITY_CHANGES=$(echo "$CHANGED_FILES" | grep -E "jest\.config|vitest\.config|codecov\.yml|\.nycrc|sonar" 2>/dev/null)
+QUALITY_CHANGES=$(echo "$CHANGED_FILES" | grep -E "jest\.config|vitest\.config|codecov\.yml|\.nycrc|sonar|pytest\.ini|setup\.cfg|pyproject\.toml|\.coveragerc" 2>/dev/null)
 if [ -n "$QUALITY_CHANGES" ]; then
-  THRESHOLD_DROP=$(echo "$DIFF" | grep "^-" | grep -E "[0-9]" 2>/dev/null)
+  THRESHOLD_DROP=$(echo "$DIFF" | grep "^-" | grep -v "^---" | grep -E "[0-9]" 2>/dev/null)
   [ -n "$THRESHOLD_DROP" ] && warn "Numeric value decreased in quality config — check for threshold lowering" "$THRESHOLD_DROP"
 fi
+
+# 16b. Coverage threshold drop — --cov-fail-under in any changed file (CI YAML, tox.ini, Makefile, etc.)
+COV_DROP=$(echo "$DIFF" | grep "^-" | grep -v "^---" | grep -E "\-\-cov-fail-under[= ][0-9]|cov_fail_under[[:space:]]*=[[:space:]]*[0-9]|fail_under[[:space:]]*=[[:space:]]*[0-9]" 2>/dev/null)
+[ -n "$COV_DROP" ] && warn "Coverage threshold lowered (--cov-fail-under decreased) — verify this wasn't done to make CI pass" "$COV_DROP"
 
 # 17. .env.example drift
 ENV_REFS=$(echo "$ADDED" | grep -E "process\.env\.|os\.environ\[|getenv\(|import\.meta\.env\." 2>/dev/null)
