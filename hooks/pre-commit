@@ -26,7 +26,7 @@ fi
 
 # 2. Credential scan across ALL tracked files (not just staged)
 # Exclude test dirs, example/sample files — they legitimately contain dummy credentials
-CREDS=$(git grep -nP "$CRED_PATTERN" -- ':!tests/' ':!test/' ':!spec/' ':!*.example' ':!*.sample' ':!*.test.*' ':!*.spec.*' 2>/dev/null)
+CREDS=$(git grep -nP "$CRED_PATTERN" -- ':(exclude,glob)**/tests/**' ':(exclude,glob)**/test/**' ':(exclude,glob)**/spec/**' ':(exclude,glob)**/*.example' ':(exclude,glob)**/*.sample' ':(exclude,glob)**/*.test.*' ':(exclude,glob)**/*.spec.*' 2>/dev/null)
 if [ -n "$CREDS" ]; then
   bail "STOP -- credential pattern found in tracked files:" "$CREDS" \
     "Credentials in git history are permanent even after deletion. Run: vibe-safe commit"
