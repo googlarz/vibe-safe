@@ -3,19 +3,40 @@
 # Install: copy to .github/vibe-safe/vibe-safe-ci.sh in your repo
 # Usage: BASE_BRANCH=main sh .github/vibe-safe/vibe-safe-ci.sh
 
-BASE_BRANCH="${BASE_BRANCH:-${GITHUB_BASE_REF:-main}}"
+BASE_BRANCH="${BASE_BRANCH:-${GITHUB_BASE_REF:-${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-${BITBUCKET_PR_DESTINATION_BRANCH:-main}}}}"
 CRED_PATTERN="sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="
 VIBESAFE_VERSION="1.9.0"
 
 # Use GH_TOKEN or GITHUB_TOKEN (GitHub Actions sets GITHUB_TOKEN automatically)
 GH_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"
 
-# GitHub Actions annotation helpers
+# Detect CI system
+CI_SYSTEM="generic"
+[ -n "$GITHUB_ACTIONS" ] && CI_SYSTEM="github"
+[ -n "$GITLAB_CI" ] && CI_SYSTEM="gitlab"
+[ -n "$BITBUCKET_BUILD_NUMBER" ] && CI_SYSTEM="bitbucket"
+
+_annotation_error() {
+  case "$CI_SYSTEM" in
+    github) echo "::error::vibe-safe: $1" ;;
+    gitlab) printf '\033[31mERROR\033[0m vibe-safe: %s\n' "$1" ;;
+    *) echo "ERROR: vibe-safe: $1" ;;
+  esac
+}
+
+_annotation_warn() {
+  case "$CI_SYSTEM" in
+    github) echo "::warning::vibe-safe: $1" ;;
+    gitlab) printf '\033[33mWARN\033[0m  vibe-safe: %s\n' "$1" ;;
+    *) echo "WARN:  vibe-safe: $1" ;;
+  esac
+}
+
 FAILED=0
 FINDINGS=""
 
 fail() {
-  echo "::error::vibe-safe: $1"
+  _annotation_error "$1"
   printf '%s\n' "$2"
   echo ""
   echo "$3"
@@ -26,7 +47,7 @@ fail() {
 }
 
 warn() {
-  echo "::warning::vibe-safe: $1"
+  _annotation_warn "$1"
   printf '%s\n' "$2"
   echo ""
   FINDINGS="${FINDINGS}⚠️  $1
@@ -257,7 +278,7 @@ fi
 if [ -f ".vibesafe" ]; then
   REQ_REVIEWER=$(grep "^require_reviewer:" .vibesafe 2>/dev/null | sed 's/^require_reviewer:[[:space:]]*//')
   if [ -n "$REQ_REVIEWER" ]; then
-    if [ -n "$GH_TOKEN" ] && [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_REPOSITORY" ]; then
+    if [ -n "$GH_TOKEN" ] && [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_REPOSITORY" ] && [ "$CI_SYSTEM" = "github" ]; then
       REQUESTED=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" \
         --jq '.users[].login' 2>/dev/null)
       REVIEWED=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
@@ -270,7 +291,7 @@ if [ -f ".vibesafe" ]; then
         fi
       done
     else
-      warn "require_reviewer=${REQ_REVIEWER} — skipped (GH_TOKEN or PR_NUMBER not available)" ""
+      warn "require_reviewer=${REQ_REVIEWER} — skipped (GitHub token or PR number not available)" ""
     fi
   fi
 fi
@@ -281,7 +302,7 @@ if [ -n "$JS_CHANGES" ]; then
   MISSING_AWAIT=""
   for sf in $JS_CHANGES; do
     FILE_ADDED=$(git diff "origin/$BASE_BRANCH"...HEAD -- "$sf" 2>/dev/null | grep "^+" | grep -v "^+++")
-    MATCH=$(echo "$FILE_ADDED" | grep -E "[^=!<>]=[[:space:]]*(fetch|axios|prisma\.|db\.|User\.|Order\.|mongoose\.)" 2>/dev/null | grep -v "await" | grep -v "==" | grep -v "=>")
+    MATCH=$(echo "$FILE_ADDED" | grep -E "=[[:space:]]*(fetch|axios\.(get|post|put|delete|patch)|prisma\.[a-zA-Z]+\.(find|create|update|delete|upsert|count|findFirst|findMany|aggregate)|db\.(query|execute|run|all|get))\(" 2>/dev/null | grep -v "await")
     [ -n "$MATCH" ] && MISSING_AWAIT="${MISSING_AWAIT:+$MISSING_AWAIT
 }$sf: $MATCH"
   done
@@ -299,7 +320,7 @@ if [ -n "$SEC_RAND" ]; then
 fi
 
 # 23. SQL string concatenation (injection risk)
-SQLI=$(echo "$ADDED" | grep -E '(SELECT|INSERT|UPDATE|DELETE|WHERE).*["\x27][[:space:]]*\+|f["\x27](SELECT|INSERT|UPDATE|DELETE)' 2>/dev/null)
+SQLI=$(echo "$ADDED" | grep -v -E "^(\+[[:space:]]*)?(#|//|\*)" | grep -E "['\"]([[:space:]]*(SELECT|INSERT|UPDATE|DELETE|WHERE))[^'\"]*['\"][[:space:]]*\+|f['\x27](SELECT|INSERT|UPDATE|DELETE).*\{" 2>/dev/null)
 [ -n "$SQLI" ] && fail "STOP — SQL string concatenation" "$SQLI" \
   "Use parameterized queries / prepared statements. String-built SQL is injectable."
 
@@ -339,30 +360,66 @@ ${AUDIT_NOTE}
 ---
 *[vibe-safe](https://github.com/googlarz/vibe-safe) v${VIBESAFE_VERSION}*"
 
-# Write to GitHub Actions job summary
-if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+# Write to job summary (CI-system-aware)
+if [ "$CI_SYSTEM" = "github" ] && [ -n "$GITHUB_STEP_SUMMARY" ]; then
   printf '%s\n' "$COMMENT_BODY" >> "$GITHUB_STEP_SUMMARY"
+elif [ "$CI_SYSTEM" = "gitlab" ]; then
+  # GitLab: write to job log section (no native step summary)
+  echo "$COMMENT_BODY"
 fi
 
-# Post or update PR comment (gracefully handles fork PRs with read-only tokens)
-if [ -n "$GH_TOKEN" ] && [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_REPOSITORY" ]; then
-  EXISTING_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-    --jq '.[] | select(.body | startswith("<!-- vibe-safe-audit -->")) | .id' 2>/dev/null | head -1)
-  BODY_FILE=$(mktemp)
-  printf '%s' "$COMMENT_BODY" > "$BODY_FILE"
-  if [ -n "$EXISTING_ID" ]; then
-    gh api "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING_ID" \
-      -X PATCH --input "$BODY_FILE" >/dev/null 2>&1 \
-      && echo "vibe-safe: PR comment updated" \
-      || echo "vibe-safe: PR comment update skipped (fork PR — token is read-only)"
-  else
-    gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-      --input "$BODY_FILE" >/dev/null 2>&1 \
-      && echo "vibe-safe: PR comment posted" \
-      || echo "vibe-safe: PR comment post skipped (fork PR — token is read-only)"
-  fi
-  rm -f "$BODY_FILE"
-fi
+# Post or update PR/MR comment
+case "$CI_SYSTEM" in
+  github)
+    if [ -n "$GH_TOKEN" ] && [ -n "$PR_NUMBER" ] && [ -n "$GITHUB_REPOSITORY" ]; then
+      EXISTING_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+        --jq '.[] | select(.body | startswith("<!-- vibe-safe-audit -->")) | .id' 2>/dev/null | head -1)
+      BODY_FILE=$(mktemp)
+      printf '%s' "$COMMENT_BODY" > "$BODY_FILE"
+      if [ -n "$EXISTING_ID" ]; then
+        gh api "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING_ID" \
+          -X PATCH --input "$BODY_FILE" >/dev/null 2>&1 \
+          && echo "vibe-safe: PR comment updated" \
+          || echo "vibe-safe: PR comment update skipped (fork PR — token is read-only)"
+      else
+        gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          --input "$BODY_FILE" >/dev/null 2>&1 \
+          && echo "vibe-safe: PR comment posted" \
+          || echo "vibe-safe: PR comment post skipped (fork PR — token is read-only)"
+      fi
+      rm -f "$BODY_FILE"
+    fi
+    ;;
+  gitlab)
+    if [ -n "$GITLAB_TOKEN" ] && [ -n "$CI_MERGE_REQUEST_IID" ] && [ -n "$CI_PROJECT_ID" ]; then
+      GL_BODY_FILE=$(mktemp)
+      printf '%s' "$COMMENT_BODY" > "$GL_BODY_FILE"
+      curl -s -X POST \
+        "${CI_SERVER_URL:-https://gitlab.com}/api/v4/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes" \
+        -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        -F "body=<$GL_BODY_FILE" >/dev/null 2>&1 \
+        && echo "vibe-safe: MR note posted" \
+        || echo "vibe-safe: MR note post skipped"
+      rm -f "$GL_BODY_FILE"
+    fi
+    ;;
+  bitbucket)
+    if [ -n "$BITBUCKET_TOKEN" ] && [ -n "$BITBUCKET_PR_ID" ] && [ -n "$BITBUCKET_REPO_FULL_NAME" ]; then
+      BB_BODY_FILE=$(mktemp)
+      printf '{"content":{"raw":"%s"}}' \
+        "$(printf '%s' "$COMMENT_BODY" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n",$0}')" \
+        > "$BB_BODY_FILE"
+      curl -s -X POST \
+        "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_REPO_FULL_NAME/pullrequests/$BITBUCKET_PR_ID/comments" \
+        -H "Authorization: Bearer $BITBUCKET_TOKEN" \
+        -H "Content-Type: application/json" \
+        --data "@$BB_BODY_FILE" >/dev/null 2>&1 \
+        && echo "vibe-safe: PR comment posted" \
+        || echo "vibe-safe: PR comment post skipped"
+      rm -f "$BB_BODY_FILE"
+    fi
+    ;;
+esac
 
 echo ""
 if [ "$FAILED" = "1" ]; then

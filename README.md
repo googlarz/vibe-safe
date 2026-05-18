@@ -82,6 +82,31 @@ cp ~/.claude/skills/vibe-safe/ci/workflow.yml .github/workflows/vibe-safe.yml
 
 Or just run `vibe-safe` — BEFORE mode installs both automatically.
 
+**GitLab CI integration:**
+
+```bash
+mkdir -p .gitlab/vibe-safe
+cp ~/.claude/skills/vibe-safe/ci/vibe-safe-ci.sh .gitlab/vibe-safe/
+```
+
+Include the job in your `.gitlab-ci.yml`:
+
+```yaml
+include:
+  - local: '/ci/gitlab-ci.yml'  # or copy the job from ci/gitlab-ci.yml
+```
+
+Set `GITLAB_TOKEN` in your CI/CD variables (Settings → CI/CD → Variables) to enable MR comment posting.
+
+**Bitbucket Pipelines integration:**
+
+```bash
+mkdir -p .bitbucket/vibe-safe
+cp ~/.claude/skills/vibe-safe/ci/vibe-safe-ci.sh .bitbucket/vibe-safe/
+```
+
+Merge the step definition from `ci/bitbucket-pipelines.yml` into your `bitbucket-pipelines.yml`.
+
 ---
 
 ## Usage

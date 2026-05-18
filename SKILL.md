@@ -512,17 +512,71 @@ Claude provides:
 
 ## Mode: REVIEWER
 
-For developers reviewing a pull request opened by a non-technical contributor.
+For developers reviewing a PR opened by a non-technical contributor using Claude.
 
-Claude reads `git diff main...HEAD` and produces a developer-facing summary:
+**When to use:** You're reviewing a PR where the author isn't a developer. You want to understand what they intended vs. what Claude actually changed — and what needs your attention — without reading the full diff yourself.
 
-- **What the PM intended** — derived from branch name, commit messages, and file scope
-- **What actually changed** — file-by-file summary in developer language
-- **Risk surface** — which vibe-safe patterns are present in the diff, ranked by severity
-- **What to specifically test** — derived from changed logic paths, file types, and risk level
-- **Questions to ask the PM** — if stated intent and actual diff don't match, surfaces the discrepancy
+**Run:**
+```
+vibe-safe reviewer
+```
 
-Invoke as the developer before approving a PR: `vibe-safe reviewer`
+**What Claude does:**
+
+1. **Read the diff** — `git diff main...HEAD` (full diff, not just staged)
+2. **Infer intent** — read commit messages, branch name, PR description if available. Ask "what was this person trying to accomplish?" If intent is ambiguous, ask the reviewer: "What did the contributor say they were changing?"
+3. **Map intent vs. reality** — classify every changed file:
+   - ✅ **IN SCOPE** — directly implements the stated intent
+   - 🔶 **LIKELY NEEDED** — supporting change that intent probably required (e.g., types update alongside component change)
+   - ⚠️ **SUSPICIOUS** — changed but not obviously connected to intent — flag for explanation
+   - ❌ **OUT OF SCOPE** — unrelated to stated intent, no plausible connection
+4. **Run vibe-safe checks** — mentally apply all COMMIT mode checks to the diff. Report any that fire.
+5. **Identify test gaps** — which changed source files have no test changes? Which have no test files at all in the repo?
+6. **Generate questions** — specific, answerable questions the developer should ask or verify before approving.
+
+**Output format:**
+
+```
+## vibe-safe REVIEWER report
+
+**Intent (inferred):** [what the contributor was trying to do]
+**Branch:** [branch name]   **Files changed:** [N]   **Commits:** [N]
+
+### File verdict
+| File | Verdict | Reason |
+|------|---------|--------|
+| src/components/Hero.tsx | ✅ IN SCOPE | hero text updated |
+| src/styles/global.css | 🔶 LIKELY NEEDED | font-size change adjacent to text edit |
+| src/api/analytics.ts | ⚠️ SUSPICIOUS | tracking call added — not mentioned in intent |
+
+### vibe-safe checks
+[List any patterns that fired, same format as COMMIT mode. If none: "No safety flags."]
+
+### Test coverage
+- [file]: no test changes alongside source change
+- [file]: no test file exists in repo — consider creating one
+
+### Questions to ask / verify before approving
+1. [specific question about a suspicious file or pattern]
+2. [specific question about intent vs. implementation mismatch]
+3. [specific question about test coverage if critical path]
+
+### Verdict
+**APPROVE** / **REQUEST CHANGES** / **DISCUSS WITH CONTRIBUTOR**
+
+[1-2 sentence summary of what the reviewer should do next]
+```
+
+**Rules for verdict:**
+- Any hard-block pattern (credential, XSS, SSL bypass, SQL injection, etc.) → **REQUEST CHANGES** immediately, don't soft-pedal it
+- OUT OF SCOPE files with no explanation → **DISCUSS WITH CONTRIBUTOR** — Claude may have gone further than asked
+- Only IN SCOPE / LIKELY NEEDED files, no flags → **APPROVE** (with any test gap notes)
+- Suspicious files with plausible explanation → **APPROVE** with comment
+
+**What REVIEWER mode is NOT:**
+- Not a substitute for understanding the business logic
+- Not a guarantee the code is correct — only that it doesn't have obvious safety failures and matches stated intent
+- Not for reviewing developer-written PRs — use a code review tool for that
 
 ---
 

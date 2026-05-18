@@ -1,0 +1,23 @@
+# vibe-safe GitLab CI template
+# Usage: include in your .gitlab-ci.yml
+#   include:
+#     - project: 'googlarz/vibe-safe'
+#       file: '/ci/gitlab-ci.yml'
+# Or copy this job into your existing .gitlab-ci.yml
+
+vibe-safe:
+  stage: test
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git curl bash
+  script:
+    - sh .gitlab/vibe-safe/vibe-safe-ci.sh
+  variables:
+    BASE_BRANCH: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    # Optional: set GITLAB_TOKEN to post MR comments
+    # GITLAB_TOKEN: $CI_JOB_TOKEN  # or a project access token
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH

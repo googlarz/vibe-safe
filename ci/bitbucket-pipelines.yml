@@ -1,0 +1,21 @@
+# vibe-safe Bitbucket Pipelines template
+# Add this step to your bitbucket-pipelines.yml pipelines section
+
+# Paste into your pipelines > pull-requests > '**' > step:
+definitions:
+  steps:
+    - step: &vibe-safe
+        name: vibe-safe safety checks
+        image: alpine/git
+        script:
+          - apk add --no-cache curl
+          - sh .bitbucket/vibe-safe/vibe-safe-ci.sh
+        variables:
+          BASE_BRANCH: $BITBUCKET_PR_DESTINATION_BRANCH
+          # Optional: set BITBUCKET_TOKEN (app password) to post PR comments
+          # BITBUCKET_TOKEN: $BITBUCKET_TOKEN
+
+pipelines:
+  pull-requests:
+    '**':
+      - step: *vibe-safe

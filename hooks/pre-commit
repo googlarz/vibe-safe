@@ -319,7 +319,7 @@ if [ -n "$JS_CHANGES" ]; then
       *) continue ;;
     esac
     FILE_ADDED=$(git diff --cached -- "$sf" 2>/dev/null | grep "^+" | grep -v "^+++")
-    MATCH=$(echo "$FILE_ADDED" | grep -E "[^=!<>]=[[:space:]]*(fetch|axios|prisma\.|db\.|User\.|Order\.|mongoose\.)" 2>/dev/null | grep -v "await" | grep -v "==" | grep -v "=>")
+    MATCH=$(echo "$FILE_ADDED" | grep -E "=[[:space:]]*(fetch|axios\.(get|post|put|delete|patch)|prisma\.[a-zA-Z]+\.(find|create|update|delete|upsert|count|findFirst|findMany|aggregate)|db\.(query|execute|run|all|get))\(" 2>/dev/null | grep -v "await")
     [ -n "$MATCH" ] && MISSING_AWAIT="${MISSING_AWAIT:+$MISSING_AWAIT
 }$sf: $MATCH"
   done
@@ -338,7 +338,7 @@ $SEC_RAND" "" ""
 fi
 
 # 27. SQL string concatenation (injection risk)
-SQLI=$(git diff --cached 2>/dev/null | grep "^+" | grep -v "^+++" | grep -E "\b(SELECT|INSERT|UPDATE|DELETE)\b" | grep -E "f['\"]|['\"].*\+[^=]|\+[[:space:]]*[a-zA-Z_]" 2>/dev/null)
+SQLI=$(git diff --cached 2>/dev/null | grep "^+" | grep -v "^+++" | grep -v -E "^(\+[[:space:]]*)?(#|//|\*)" | grep -E "['\"]([[:space:]]*(SELECT|INSERT|UPDATE|DELETE|WHERE))[^'\"]*['\"][[:space:]]*\+|f['\x27](SELECT|INSERT|UPDATE|DELETE).*\{" 2>/dev/null)
 [ -n "$SQLI" ] && bail "STOP — SQL string concatenation: use parameterized queries, string-built SQL is injectable
 $SQLI" "" ""
 
