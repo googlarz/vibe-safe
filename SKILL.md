@@ -141,7 +141,59 @@ Claude runs:
       →
    ```
 
-   PM pastes the answers back. Claude writes `.vibesafe`. Done.
+   PM pastes the answers back. Claude interprets the answers using the rules below, then shows a preview of `.vibesafe` before writing it.
+
+   **Answer interpretation rules** — apply these when processing the questionnaire responses before writing `.vibesafe`:
+
+   **Rule 1 — Philosophy ≠ decision. Re-ask as a binary.**
+   If the PM answers a yes/no question with an explanation, philosophy, or constraint instead of a clear yes/no, do NOT interpret it and move on. Re-ask as a forced choice:
+   > "Got it — so should I [enforce X as a hard rule / just flag X for a developer to review / skip X entirely]?"
+   Examples of philosophy answers that need re-asking:
+   - "migrations should be idempotent" → ask: "So enforce `require_migration_rollback: true`? Yes / No / Flag only"
+   - "it's about coverage not test count" → see Rule 3
+   - "changes should be scoped" → ask: "Should I keep max_changed_files at 12, or would a different number fit better? Keep 12 / Lower to: __ / Raise to: __"
+
+   **Rule 2 — Rejection without replacement. Ask who/what instead.**
+   If the PM rejects a proposed value without providing a replacement, don't drop the rule entirely. Ask for the replacement:
+   - "naaaah" to `require_reviewer: @alice` → ask: "Who should review PRs then? One person, or multiple? Name(s): ___"
+   - "not that" to a danger zone → ask: "What should I use instead?"
+
+   **Rule 3 — "Maybe" or vague approval. Confirm interpretation before writing.**
+   If the PM says "maybe", "probably", "I guess", or gives conditional approval, state your interpretation and ask for confirmation before writing:
+   > "I'll treat that as yes and add `admin.py` to `danger_zone` — correct? Yes / No"
+   Never silently interpret a maybe as a yes or a no.
+
+   **Rule 4 — "No idea" on a technical component. Offer a safe default.**
+   If the PM doesn't know whether a component is load-bearing (Celery worker, middleware, DI path, background job), offer:
+   > "No idea is fine — safest approach is to add it to `danger_zone` so it always gets a developer review. Do that? Yes / Skip"
+   Unknown territory defaults to flagged, not ignored.
+
+   **Rule 5 — Requested rule beyond vibe-safe's capability. Be honest, offer what's possible.**
+   If the PM asks for a rule vibe-safe can't mechanically enforce, say so and offer the closest thing:
+   - "TODO only allowed behind a feature flag" → "I can't check for feature flags automatically — that requires code understanding, not grep. I can hard-block TODO everywhere in implementation files, which means Claude must not write TODOs at all. Your developer would verify the feature-flag rule in code review. Block TODO everywhere? Yes / No"
+   - "tests must maintain coverage" → "I can enforce that every source change includes a test file in the PR (presence), but I can't measure coverage — that's your CI pipeline's job (codecov, pytest-cov, etc.). I'll enforce test presence; make sure your CI gates on coverage separately. Sound right? Yes / No"
+
+   **Rule 6 — Jargon the PM doesn't recognize. Explain before proceeding.**
+   If a question uses technical terms and the PM responds with "what does that mean?" or equivalent confusion, explain it in one sentence before asking again:
+   > "Claude model routing means your repo has configuration that controls which AI model is used for different tasks. Should changes to those config files require a developer's review? Yes / No / What files?"
+   Never re-ask the jargon-heavy version.
+
+   **Rule 7 — Preview before write.**
+   After processing all answers, before writing `.vibesafe`, show the PM what will be written:
+   ```
+   Here's what I'll write to `.vibesafe`:
+
+   danger_zone: backend/alembic/
+   danger_zone: backend/app/routers/auth.py
+   ...
+   require_tests: true
+   max_changed_files: 12
+   block_pattern: FIXME
+   require_reviewer: @team-lead
+
+   Anything to change before I create this file? Yes / Looks good
+   ```
+   Only write after explicit confirmation. This is the last checkpoint before the config is locked.
 
    **Stack-aware questions** — before sending the questionnaire, Claude runs:
    ```
