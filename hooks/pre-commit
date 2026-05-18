@@ -3,7 +3,9 @@
 # Mechanical safety checks on every commit — no Claude required.
 # Install: cp ~/.claude/skills/vibe-safe/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 
-CRED_PATTERN="sk-|pk_|ghp_|AKIA|api_key[[:space:]]*=|secret[[:space:]]*=|password[[:space:]]*=|Bearer |token[[:space:]]*="
+# Word-anchored, hyphen-aware, quote-required — avoids hashed_password= and "Bearer " parsing false positives
+# sk- allows hyphens (sk-proj-xxx format); Bearer requires 20+ char token; named vars require quoted value
+CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bghp_[A-Za-z0-9]{8,}|\bAKIA[A-Z0-9]{16}\b|\b(api_key|secret|password|token)\s*=\s*['"'"'"][A-Za-z0-9_/+\-]{8,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}'
 
 bail() {
   echo ""
@@ -23,7 +25,8 @@ if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
 fi
 
 # 2. Credential scan across ALL tracked files (not just staged)
-CREDS=$(git grep -nE "$CRED_PATTERN" 2>/dev/null)
+# Exclude test dirs, example/sample files — they legitimately contain dummy credentials
+CREDS=$(git grep -nP "$CRED_PATTERN" -- ':!tests/' ':!test/' ':!spec/' ':!*.example' ':!*.sample' ':!*.test.*' ':!*.spec.*' 2>/dev/null)
 if [ -n "$CREDS" ]; then
   bail "STOP -- credential pattern found in tracked files:" "$CREDS" \
     "Credentials in git history are permanent even after deletion. Run: vibe-safe commit"
@@ -283,7 +286,7 @@ if [ -f ".vibesafe" ]; then
         BLOCKED=""
         for sf in $STAGED_FILES; do
           case "$sf" in
-            *.test.*|*.spec.*|*__tests__*|*_test.*|*.md|*.txt) continue ;;
+            *.test.*|*.spec.*|*__tests__*|*_test.*|*.md|*.txt|.vibesafe) continue ;;
           esac
           FILE_ADDED=$(git diff --cached -- "$sf" 2>/dev/null | grep "^+" | grep -v "^+++" 2>/dev/null)
           MATCH=$(echo "$FILE_ADDED" | grep -F "$PAT" 2>/dev/null)
@@ -370,7 +373,7 @@ for f in $STAGED_FILES; do
   case "$f" in
     src/*|frontend/*|public/*|static/*|client/*|components/*|pages/*|app/*)
       FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
-      MATCH=$(echo "$FILE_ADDED" | grep -E "sk-[a-zA-Z0-9]{20,}|pk_live_|pk_test_|AKIA[A-Z0-9]{16}|api[_-]?key[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9_\-]{16,}" 2>/dev/null)
+      MATCH=$(echo "$FILE_ADDED" | grep -E "sk-[a-zA-Z0-9_-]{8,}|pk_(live|test)_[a-zA-Z0-9]{8,}|AKIA[A-Z0-9]{16}|api[_-]?key[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9_\-]{8,}" 2>/dev/null)
       [ -n "$MATCH" ] && FRONTEND_CRED="${FRONTEND_CRED:+$FRONTEND_CRED
 }$f: $MATCH"
       ;;
