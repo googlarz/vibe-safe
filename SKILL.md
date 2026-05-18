@@ -684,7 +684,72 @@ vibe-safe reviewer
 
 ---
 
-## Escalation: When to Stop
+## What vibe-safe can't catch — and how to handle it
+
+Three categories of risk that grep cannot cover. When they come up, say what the limitation is and give the concrete next step — don't just say "talk to a developer."
+
+---
+
+### API response data exposure
+
+**Why vibe-safe can't catch it:** Whether a response leaks sensitive fields depends on what the serializer/schema includes — and that requires understanding the data model, not just reading added lines.
+
+**What to do:**
+
+1. **Use allowlist serializers, not raw model returns.** The pattern `return await db.user.findFirst(...)` directly in a route handler is the root cause. The fix is always a schema/serializer that explicitly names the fields to expose:
+   - FastAPI: `response_model=UserPublic` on the route decorator
+   - Django REST: a `serializer_class` that explicitly lists `fields`
+   - Rails: `render json: user.as_json(only: [:id, :name])` not `render json: user`
+   - Prisma/Node: `select: { id: true, name: true }` not returning the full object
+
+2. **Audit new route handlers before merge.** When a new endpoint is added, the developer reviewing it should ask: "does the response go through a schema that explicitly allowlists fields, or is it returning a raw DB object?" This is what REVIEWER mode surfaces.
+
+3. **Runtime scan before launch.** Tools: [OWASP ZAP](https://www.zaproxy.org/) (free), Burp Suite, or a simple curl against your staging API checking that sensitive fields (`password_hash`, `internal_id`, `stripe_customer_id`, `ssn`, `dob`) don't appear in responses. Run this as part of your staging checklist, not just pre-commit.
+
+4. **Add a test that asserts response shape.** The most durable protection is a test that explicitly asserts which fields appear in the response and fails if new ones are added without review.
+
+---
+
+### Privacy policy
+
+**Why vibe-safe can't catch it:** Whether you need a privacy policy depends on what data you collect, where your users are, and which regulations apply — none of which are in the code.
+
+**What to do:**
+
+1. **The trigger is collecting personal data, not shipping code.** If any of these exist in your models or API payloads — `email`, `name`, `phone`, `ip_address`, `location`, `user_agent`, `device_id`, `date_of_birth`, behavioral tracking — you are collecting personal data and need a policy before you expose this to real users.
+
+2. **Jurisdiction determines the requirement:**
+   - EU/EEA users → GDPR applies. You need a privacy policy, a lawful basis for processing, and data subject rights (access, deletion, portability).
+   - California users → CCPA applies if you meet the thresholds (>$25M revenue, >50k users, or >50% revenue from selling data).
+   - UK → UK GDPR (same substance as EU GDPR post-Brexit).
+   - When in doubt: write the policy anyway. The cost of writing one is far less than the cost of not having one when you need it.
+
+3. **Fast path for early-stage products:** [iubenda](https://www.iubenda.com), [Termly](https://termly.io), or [GetTerms.io](https://getterms.io) generate compliant policies for ~$10/month. Use one of these. Do not write your own from scratch or copy one from another site.
+
+4. **What a developer can do now:** Before adding any new PII field to a model, answer: "what's the purpose, retention period, and who has access?" Document it. This becomes the basis for the privacy policy and also forces the right design conversation.
+
+---
+
+### Data storage architecture
+
+**Why vibe-safe can't catch it:** Where data ends up, who can access it, and whether it's encrypted at rest requires understanding infrastructure — not reading diffs.
+
+**What to do:**
+
+1. **Map it before you build it.** Before adding a new data entity, answer four questions:
+   - Where is it stored? (Postgres table, S3 bucket, Redis cache, CloudWatch log, third-party API)
+   - Who can read it? (application service role, DBA, DevOps, third-party vendor)
+   - How long is it kept? (forever, 90 days, deleted on account close)
+   - Is it encrypted at rest? (database-level, field-level for PII, or not at all)
+   If you can't answer these, the feature isn't ready to build.
+
+2. **Logs are a data store.** Whatever goes into `console.log`, `logger.info`, or your observability platform (Datadog, Sentry, CloudWatch) is stored, queryable, and often retained for months. Treat log destinations as data stores with the same access controls.
+
+3. **Third-party SDKs are data stores.** When you add Segment, Mixpanel, Intercom, Sentry, FullStory, or similar: you are sending user data to their infrastructure. Check what each SDK collects by default, whether it can be configured to exclude PII, and whether their DPA (Data Processing Agreement) covers your jurisdiction.
+
+4. **The one question to ask before any new integration:** "Does this send user data off our infrastructure, and if so, what data, to whom, and under what terms?" This question should be answered before the SDK is added to `package.json`, not after it's in production.
+
+---
 
 ### STOP — CALL A DEVELOPER (non-negotiable)
 - Any file in `migrations/`, `schema/`, `db/` is in the diff
