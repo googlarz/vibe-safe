@@ -74,8 +74,47 @@ Claude runs:
 **Output:**
 
 1. **Scoped prompt** — limits what files Claude is allowed to touch. Use it verbatim.
-2. **Hook installation** — if no pre-commit hook exists, Claude copies `~/.claude/skills/vibe-safe/hooks/pre-commit` to `.git/hooks/pre-commit` and makes it executable. This hook runs branch + credential + Danger Zone checks on every future `git commit`, without requiring you to remember vibe-safe.
-3. **CI installation** — if no `.github/workflows/vibe-safe.yml` exists, Claude copies `ci/vibe-safe-ci.sh` to `.github/vibe-safe/` and `ci/workflow.yml` to `.github/workflows/vibe-safe.yml`. This runs the same checks in GitHub Actions on every push and PR — closing the `git commit --no-verify` bypass gap. The hook can be skipped; CI cannot.
+2. **Hook installation** — check for an existing pre-commit hook first:
+   - **No existing hook** → copy `~/.claude/skills/vibe-safe/hooks/pre-commit` to `.git/hooks/pre-commit` and `chmod +x`
+   - **Hook already exists** → wrap it: create a new hook that runs the existing hook first, then vibe-safe. Do not overwrite. Announce what was wrapped: "Existing hook detected (code-review-graph / husky / custom) — vibe-safe will run after it."
+   ```sh
+   # Wrapper pattern when hook already exists:
+   #!/bin/sh
+   # vibe-safe wrapper — runs existing hook first
+   sh .git/hooks/pre-commit.bak "$@"
+   RESULT=$?
+   [ "$RESULT" -ne 0 ] && exit "$RESULT"
+   sh ~/.claude/skills/vibe-safe/hooks/pre-commit
+   ```
+   Back up the existing hook to `.git/hooks/pre-commit.bak` before wrapping.
+
+3. **CI installation** — the CI workflow file lives at `.github/workflows/vibe-safe.yml`, which is itself a Danger Zone path. Always treat it this way:
+   - Do not silently copy it into the current branch
+   - Always tell the contributor: "The CI workflow file needs a developer to review and merge it — `.github/workflows/` is a danger zone. I'll prepare the file, but it should go in as a separate PR that a developer approves."
+   - Offer two paths:
+     - **Path A (recommended):** Stage just the CI files on the current branch and note in the PR description that a developer needs to review the `.github/workflows/` change specifically
+     - **Path B:** Create a separate `chore/install-vibe-safe-ci` branch for the CI file, so the contributor's feature work isn't blocked
+   - Never suggest committing the CI workflow file the same way as `.vibesafe` or the hook — those are safe for the contributor to own; the workflow file is not
+
+**Post-generation step order** — after `.vibesafe` is written and confirmed, present these in sequence, one at a time:
+
+```
+Next steps:
+
+1. Commit .vibesafe now — this makes the rules live for everyone on the team.
+   Stage + commit on this branch? Yes / Not yet
+
+2. Install the pre-commit hook (runs locally on every git commit, no Claude needed).
+   [shows whether existing hook was detected and whether it will wrap or install fresh]
+   Install now? Yes / Skip
+
+3. Install CI workflow (.github/workflows/vibe-safe.yml).
+   ⚠️  This file is in your danger_zone: .github/workflows/ — a developer needs to
+   review this before it merges. I'll prepare the file, but don't commit it yourself.
+   Prepare file for developer review? Yes / Skip
+```
+
+Never present all three at once as a list to action simultaneously. Step 1 is safe for the contributor to own. Step 2 is local and safe. Step 3 always requires developer involvement — say so explicitly, every time, not just when `.github/workflows/` is in the detected danger zones.
 4. **`.vibesafe` generation** — if no `.vibesafe` exists, Claude asks:
    - "What parts of this codebase should a developer always be consulted on?"
    - "What areas are definitely yours to edit freely (copy, images, marketing)?"
