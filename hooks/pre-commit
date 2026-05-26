@@ -6,7 +6,7 @@
 # Word-anchored, hyphen-aware, colon+equals, special-char-aware — catches object literals and real passwords
 # [:=] catches both assignment (password = 'x') and object property (password: 'x')
 # !@# in value class catches real passwords like Demo@123! that pure alphanum misses
-CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bgh[opushr]_[A-Za-z0-9]{16,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\b(AKIA|ASIA)[A-Z0-9]{16}\b|\bhf_[A-Za-z0-9]{16,}|\bnpm_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{20,}|\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{20,}|\bwhsec_[A-Za-z0-9]{20,}|\b(api_key|secret|password|token)\s*[:=]\s*['"'"'"][A-Za-z0-9_/+\-!@#]{4,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}'
+CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bgh[opushr]_[A-Za-z0-9]{16,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\b(AKIA|ASIA)[A-Z0-9]{16}\b|\bhf_[A-Za-z0-9]{16,}|\bnpm_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{20,}|\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{20,}|\bwhsec_[A-Za-z0-9]{20,}|\b(api_key|secret|password|token)\s*[:=]\s*['"'"'"][A-Za-z0-9_/+\-!@#]{4,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}|AccountKey=[A-Za-z0-9+/]{40,}={0,2}|"private_key_id"\s*:\s*"[a-f0-9]{40}"'
 
 bail() {
   echo ""
@@ -37,6 +37,22 @@ fi
 STAGED_DIFF=$(git diff --cached 2>/dev/null)
 ADDED=$(echo "$STAGED_DIFF" | grep "^+" | grep -v "^+++" 2>/dev/null)
 STAGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+
+# Workflow files referenced by checks 54, 55, 64 — define once
+WF_FILES=$(echo "$STAGED_FILES" | grep -E "\.github/workflows/.*\.ya?ml$" 2>/dev/null)
+
+# 64. Unpinned GitHub Actions — emit warning before danger-zone bail so it's always visible
+for wf in $WF_FILES; do
+  WF_ADDED=$(git diff --cached -- "$wf" 2>/dev/null | grep "^+" | grep -v "^+++")
+  UNPINNED=$(echo "$WF_ADDED" | grep -E "uses:\s+[A-Za-z0-9_/-]+@(v[0-9]|main|master|latest|HEAD)" 2>/dev/null)
+  if [ -n "$UNPINNED" ]; then
+    echo ""
+    echo "vibe-safe: GitHub Action not pinned to SHA in $wf -- tag can be overwritten by maintainer"
+    echo "$UNPINNED"
+    echo "  Pin to a full commit SHA: uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+    echo ""
+  fi
+done
 
 # 3. Danger zone check on staged files
 DANGER=""
@@ -568,7 +584,6 @@ if echo "$STAGED_FILES" | grep -q "package\.json"; then
 fi
 
 # 54. GitHub Actions: pull_request_target without head SHA pinning (fork PR code-exec)
-WF_FILES=$(echo "$STAGED_FILES" | grep -E "\.github/workflows/.*\.ya?ml$" 2>/dev/null)
 for wf in $WF_FILES; do
   if grep -q "pull_request_target" "$wf" 2>/dev/null; then
     HAS_PIN=$(grep -E "ref:\s*\\\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\}\}" "$wf" 2>/dev/null)
@@ -634,4 +649,48 @@ if [ -n "$MIG_STAGED" ]; then
   done
 fi
 
-echo "vibe-safe: all 59 checks passed -- clear"
+# ──────────── Tier 8: Python pitfalls ────────────
+
+# 59. yaml.load() without SafeLoader — arbitrary Python code execution via crafted YAML
+PY_STAGED=$(echo "$STAGED_FILES" | grep -E "\.py$" 2>/dev/null)
+if [ -n "$PY_STAGED" ]; then
+  YAML_UNSAFE=$(echo "$ADDED" | grep -E "\byaml\.load\s*\(" 2>/dev/null | grep -v -E "SafeLoader|BaseLoader|safe_load" 2>/dev/null)
+  [ -n "$YAML_UNSAFE" ] && bail "STOP -- yaml.load() executes arbitrary Python from crafted YAML input:" "$YAML_UNSAFE" \
+    "Use yaml.safe_load() instead. yaml.load() with a Loader that allows Python objects is RCE."
+fi
+
+# 60. pickle deserialization — arbitrary code execution, no conditions required
+if [ -n "$PY_STAGED" ]; then
+  PICKLE=$(echo "$ADDED" | grep -E "\bpickle\.(loads?|Unpickler)\s*\(" 2>/dev/null)
+  [ -n "$PICKLE" ] && bail "STOP -- pickle deserialization: executing attacker-controlled bytecode:" "$PICKLE" \
+    "Never unpickle data from untrusted or network sources. Use JSON, msgpack, or protobuf instead."
+fi
+
+# 61. Python bare except: — swallows KeyboardInterrupt, SystemExit, and all exceptions
+if [ -n "$PY_STAGED" ]; then
+  BARE_EXCEPT=$(echo "$ADDED" | grep -E "^\+[[:space:]]*except[[:space:]]*:" 2>/dev/null)
+  [ -n "$BARE_EXCEPT" ] && bail "PAUSE -- bare except: added (swallows all exceptions incl. KeyboardInterrupt):" "$BARE_EXCEPT" \
+    "Specify the exception type. Bare except: hides crashes and can mask security failures silently. Run: vibe-safe commit"
+fi
+
+# 62. Python exec() in non-test files
+if [ -n "$PY_STAGED" ]; then
+  PY_EXEC=$(echo "$ADDED" | grep -E "\bexec\s*\(" 2>/dev/null)
+  if [ -n "$PY_EXEC" ]; then
+    PY_NON_TEST=$(echo "$STAGED_FILES" | grep -E "\.py$" | grep -v -E "\.test\.|_test\.|/tests/|/test_" 2>/dev/null)
+    [ -n "$PY_NON_TEST" ] && bail "PAUSE -- exec() in Python source file:" "$PY_EXEC" \
+      "exec() runs arbitrary Python. If needed, verify input is from a trusted internal source only. Run: vibe-safe commit"
+  fi
+fi
+
+# 63. Python random module in security-sensitive file (mirrors check 26 for JS)
+PY_RND=$(git diff --cached -- '*.py' 2>/dev/null | grep "^+" | grep -v "^+++" | grep -E "\brandom\.(randint|randrange|choice|choices|shuffle|sample|random)\s*\(" 2>/dev/null)
+if [ -n "$PY_RND" ]; then
+  PY_SEC_FILES=$(echo "$STAGED_FILES" | grep -iE "auth|token|session|crypto|key|secret|password|otp|reset" 2>/dev/null | grep -E "\.py$" 2>/dev/null)
+  if [ -n "$PY_SEC_FILES" ]; then
+    bail "STOP -- random module in security-related Python file: use secrets.token_hex() or secrets.choice()
+$PY_RND" "" ""
+  fi
+fi
+
+echo "vibe-safe: all 66 checks passed -- clear"
