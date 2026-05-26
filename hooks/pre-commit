@@ -608,4 +608,30 @@ AES_ECB=$(echo "$ADDED" | grep -iE "createCipher(iv)?\s*\(\s*['\"]aes[-_]?[0-9]+
 [ -n "$AES_ECB" ] && bail "STOP -- AES in ECB mode (or default Java AES = ECB):" "$AES_ECB" \
   "Use AES-GCM (authenticated) or AES-CBC with a random IV. ECB encrypts identical plaintext blocks identically."
 
-echo "vibe-safe: all 58 checks passed -- clear"
+# ──────────── Tier 7: migration integrity ────────────
+
+# 58. Migration revision chain conflict (Alembic parallel-head / split-chain detection)
+# When two migrations share the same down_revision, alembic upgrade head fails because
+# there are multiple heads and it cannot determine which branch to follow.
+MIG_STAGED=$(echo "$STAGED_FILES" | grep -E "migrations/.*\.py$" 2>/dev/null)
+if [ -n "$MIG_STAGED" ]; then
+  for mf in $MIG_STAGED; do
+    # Read down_revision from the staged (index) version of the file
+    DOWN_REV=$(git show ":$mf" 2>/dev/null | grep -E "^down_revision\s*=" | head -1 \
+      | sed "s/.*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/")
+    # Skip: empty, None (root migration), or tuple (merge migration — starts with '(')
+    [ -z "$DOWN_REV" ] && continue
+    case "$DOWN_REV" in None|none|null|"("*) continue ;; esac
+    # Search the committed tree for another migration that uses the same down_revision
+    CONFLICT=$(git grep -lP "^down_revision\s*=\s*[\"']${DOWN_REV}[\"']" HEAD 2>/dev/null | grep -v ":${mf}$")
+    if [ -n "$CONFLICT" ]; then
+      CONFLICT_FILE=$(echo "$CONFLICT" | sed 's/^HEAD://')
+      bail "STOP -- migration revision conflict: two migrations share parent '$DOWN_REV'" \
+        "  Your staged migration:  $mf
+  Already on branch:     $CONFLICT_FILE" \
+        "Update down_revision in $mf to the current migration HEAD (not '$DOWN_REV'). Run: alembic heads"
+    fi
+  done
+fi
+
+echo "vibe-safe: all 59 checks passed -- clear"
