@@ -3,9 +3,10 @@
 # Mechanical safety checks on every commit — no Claude required.
 # Install: cp ~/.claude/skills/vibe-safe/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 
-# Word-anchored, hyphen-aware, quote-required — avoids hashed_password= and "Bearer " parsing false positives
-# sk- allows hyphens (sk-proj-xxx format); Bearer requires 20+ char token; named vars require quoted value
-CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bghp_[A-Za-z0-9]{8,}|\bAKIA[A-Z0-9]{16}\b|\b(api_key|secret|password|token)\s*=\s*['"'"'"][A-Za-z0-9_/+\-]{8,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}'
+# Word-anchored, hyphen-aware, colon+equals, special-char-aware — catches object literals and real passwords
+# [:=] catches both assignment (password = 'x') and object property (password: 'x')
+# !@# in value class catches real passwords like Demo@123! that pure alphanum misses
+CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bghp_[A-Za-z0-9]{8,}|\bAKIA[A-Z0-9]{16}\b|\b(api_key|secret|password|token)\s*[:=]\s*['"'"'"][A-Za-z0-9_/+\-!@#]{4,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}'
 
 bail() {
   echo ""
@@ -408,4 +409,23 @@ for f in $STAGED_FILES; do
   fi
 done
 
-echo "vibe-safe: all 34 checks passed -- clear"
+# 35. Hardcoded credential objects (email + password literal in same file — seed/demo/fixture data)
+# Vite/webpack bundle these into the public JS artifact, making them readable without auth.
+CRED_OBJ=""
+for f in $STAGED_FILES; do
+  case "$f" in *.js|*.ts|*.jsx|*.tsx|*.mjs|*.cjs|*.py|*.rb|*.go) ;;
+    *) continue ;;
+  esac
+  case "$f" in *.test.*|*.spec.*|*__tests__*|*_test.*|*fixture*|*seed*|*mock*) continue ;; esac
+  FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+  HAS_EMAIL=$(echo "$FILE_ADDED" | grep -iE '\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b' 2>/dev/null)
+  HAS_PASS=$(echo "$FILE_ADDED" | grep -iE 'password[[:space:]]*[:=]' 2>/dev/null | grep -v -iE '^\+[[:space:]]*(//|#|/\*)' 2>/dev/null)
+  if [ -n "$HAS_EMAIL" ] && [ -n "$HAS_PASS" ]; then
+    CRED_OBJ="${CRED_OBJ:+$CRED_OBJ
+}  $f"
+  fi
+done
+[ -n "$CRED_OBJ" ] && bail "STOP -- hardcoded credential object in source file (email + password literal):" "$CRED_OBJ" \
+  "Bundlers (Vite/webpack) inline these into the public JS artifact — readable without auth. Move to env vars or a secrets manager."
+
+echo "vibe-safe: all 35 checks passed -- clear"
