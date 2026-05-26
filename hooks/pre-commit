@@ -6,7 +6,7 @@
 # Word-anchored, hyphen-aware, colon+equals, special-char-aware — catches object literals and real passwords
 # [:=] catches both assignment (password = 'x') and object property (password: 'x')
 # !@# in value class catches real passwords like Demo@123! that pure alphanum misses
-CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bghp_[A-Za-z0-9]{8,}|\bAKIA[A-Z0-9]{16}\b|\b(api_key|secret|password|token)\s*[:=]\s*['"'"'"][A-Za-z0-9_/+\-!@#]{4,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}'
+CRED_PATTERN='\bsk-[A-Za-z0-9_-]{8,}|\bpk_(live|test)_[A-Za-z0-9]{8,}|\bgh[opushr]_[A-Za-z0-9]{16,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\b(AKIA|ASIA)[A-Z0-9]{16}\b|\bhf_[A-Za-z0-9]{16,}|\bnpm_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{20,}|\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{20,}|\bwhsec_[A-Za-z0-9]{20,}|\b(api_key|secret|password|token)\s*[:=]\s*['"'"'"][A-Za-z0-9_/+\-!@#]{4,}['"'"'"]|Bearer [A-Za-z0-9._/+\-]{20,}'
 
 bail() {
   echo ""
@@ -428,4 +428,184 @@ done
 [ -n "$CRED_OBJ" ] && bail "STOP -- hardcoded credential object in source file (email + password literal):" "$CRED_OBJ" \
   "Bundlers (Vite/webpack) inline these into the public JS artifact — readable without auth. Move to env vars or a secrets manager."
 
-echo "vibe-safe: all 35 checks passed -- clear"
+# ──────────── Tier 1: more credential shapes ────────────
+
+# 36. Connection strings with embedded credentials (postgres://user:pass@host)
+CONN_CREDS=$(echo "$ADDED" | grep -iE "(postgres|postgresql|mysql|mongodb|mongodb\+srv|redis|amqp|amqps)://[a-zA-Z0-9_.\-]+:[^@'\"[:space:]/]{4,}@" 2>/dev/null)
+[ -n "$CONN_CREDS" ] && bail "STOP -- connection string with embedded credentials:" "$CONN_CREDS" \
+  "Move the password to an env var, build the URL at runtime."
+
+# 37. PEM private key / certificate as string literal (file extension check already exists)
+PEM_STR=$(echo "$ADDED" | grep -E "['\"\`]-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE|RSA PRIVATE KEY|OPENSSH PRIVATE KEY)" 2>/dev/null)
+[ -n "$PEM_STR" ] && bail "STOP -- PEM key/cert as inline string literal:" "$PEM_STR" \
+  "Load from a secrets manager or file at runtime, not inline in source."
+
+# 38. JWT structural pattern (header.payload.signature with eyJ prefix)
+JWT_LIT=$(echo "$ADDED" | grep -E "eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_\-]{10,}" 2>/dev/null)
+[ -n "$JWT_LIT" ] && bail "STOP -- JWT token literal in source:" "$JWT_LIT" \
+  "JWTs in source are real, valid tokens. Rotate the signing key, revoke the token, move to env."
+
+# 39. (covered by extended CRED_PATTERN above — ASIA/gho_/ghs_/ghr_/github_pat_/hf_/npm_/xox*/SG./whsec_)
+
+# 40. Public-bundled env var with secret-ish name (NEXT_PUBLIC_*, VITE_*, REACT_APP_*)
+PUB_SECRET=$(echo "$ADDED" | grep -E "(NEXT_PUBLIC_|VITE_|REACT_APP_|PUBLIC_|EXPO_PUBLIC_)[A-Z0-9_]*(SECRET|PRIVATE|TOKEN|API_KEY|APIKEY|PASSWORD|CREDENTIAL)" 2>/dev/null)
+[ -n "$PUB_SECRET" ] && bail "STOP -- public-bundled env var name implies a secret:" "$PUB_SECRET" \
+  "NEXT_PUBLIC_/VITE_/REACT_APP_/EXPO_PUBLIC_ vars are inlined into the public JS bundle. Rename or use a server-only var."
+
+# ──────────── Tier 2: authz/authn mistakes ────────────
+
+# 41. Permission decision from client-controlled input (handles dot AND bracket access)
+CLIENT_AUTH=$(echo "$ADDED" | grep -iE "req\.(body|query|headers|params)\.(role|isAdmin|is_admin|permissions?|admin|owner|userId|user_id|sub|is_owner)|req\.(body|query|headers|params)\[['\"][^'\"]*(role|admin|user|owner|permission)" 2>/dev/null)
+[ -n "$CLIENT_AUTH" ] && bail "STOP -- permission check from client-controlled input:" "$CLIENT_AUTH" \
+  "req.body/query/headers/params are attacker-controlled. Read identity from req.user (set by auth middleware)."
+
+# 42. Admin/internal route without visible auth middleware in same file
+for f in $STAGED_FILES; do
+  case "$f" in *.js|*.ts|*.jsx|*.tsx|*.py|*.rb) ;; *) continue ;; esac
+  FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+  ADMIN_ROUTE=$(echo "$FILE_ADDED" | grep -E "(app|router)\.(get|post|put|delete|patch)\(['\"]/?(api/)?(admin|internal|_private|_admin|debug)/" 2>/dev/null)
+  if [ -n "$ADMIN_ROUTE" ]; then
+    HAS_AUTH=$(grep -iE "requireAuth|isAuthenticated|isAdmin|authenticate|authorize|@login_required|@admin_required|verifyToken|requireAdmin|requireRole|checkAuth|ensureAuth|withAuth" "$f" 2>/dev/null)
+    [ -z "$HAS_AUTH" ] && echo "vibe-safe: admin/internal route in $f has no visible auth middleware -- verify auth is enforced upstream"
+  fi
+done
+
+# 43. Webhook route without visible signature verification
+for f in $STAGED_FILES; do
+  case "$f" in *.js|*.ts|*.jsx|*.tsx|*.py|*.rb) ;; *) continue ;; esac
+  FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+  WEBHOOK_ROUTE=$(echo "$FILE_ADDED" | grep -E "(app|router)\.(post|put)\(['\"]/?(api/)?(webhook|webhooks|hook|hooks)/" 2>/dev/null)
+  if [ -n "$WEBHOOK_ROUTE" ]; then
+    HAS_SIG=$(grep -iE "constructEvent|createHmac|verifySignature|stripe-signature|x-hub-signature|x-webhook-signature|x-signature|timingSafeEqual|verify_webhook" "$f" 2>/dev/null)
+    [ -z "$HAS_SIG" ] && echo "vibe-safe: webhook route in $f has no visible signature verification -- accepts any payload"
+  fi
+done
+
+# 44a. JWT sign without expiresIn (token never expires)
+JWT_NO_EXP=$(echo "$ADDED" | grep -E "jwt\.sign\(|jwt\.encode\(" 2>/dev/null)
+if [ -n "$JWT_NO_EXP" ]; then
+  for f in $STAGED_FILES; do
+    case "$f" in *.js|*.ts|*.jsx|*.tsx|*.py|*.rb) ;; *) continue ;; esac
+    FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+    SIGN=$(echo "$FILE_ADDED" | grep -E "jwt\.sign\(|jwt\.encode\(" 2>/dev/null)
+    if [ -n "$SIGN" ]; then
+      HAS_EXP=$(echo "$FILE_ADDED" | grep -E "expiresIn|exp:|'exp'|\"exp\"" 2>/dev/null)
+      [ -z "$HAS_EXP" ] && echo "vibe-safe: jwt.sign in $f without expiresIn/exp -- token never expires"
+    fi
+  done
+fi
+
+# 44b. JWT 'none' algorithm (signature bypass)
+JWT_NONE=$(echo "$ADDED" | grep -iE "algorithm[s]?\s*:\s*['\"]none['\"]|algorithm[s]?\s*:\s*\[\s*['\"]none['\"]" 2>/dev/null)
+[ -n "$JWT_NONE" ] && bail "STOP -- JWT 'none' algorithm accepts unsigned tokens:" "$JWT_NONE" \
+  "Use HS256/RS256 with a real secret. 'none' is a signature bypass."
+
+# 44c. JWT verify without algorithms whitelist
+JWT_VERIFY=$(echo "$ADDED" | grep -E "jwt\.verify\(" 2>/dev/null)
+if [ -n "$JWT_VERIFY" ]; then
+  for f in $STAGED_FILES; do
+    case "$f" in *.js|*.ts|*.jsx|*.tsx) ;; *) continue ;; esac
+    FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+    VER=$(echo "$FILE_ADDED" | grep -E "jwt\.verify\(" 2>/dev/null)
+    if [ -n "$VER" ]; then
+      HAS_ALG=$(echo "$FILE_ADDED" | grep -E "algorithms\s*:" 2>/dev/null)
+      [ -z "$HAS_ALG" ] && echo "vibe-safe: jwt.verify in $f without algorithms whitelist -- vulnerable to none-algorithm attack"
+    fi
+  done
+fi
+
+# ──────────── Tier 3: data exposure ────────────
+
+# 45. Stack trace in HTTP response (information disclosure)
+STACK_RES=$(echo "$ADDED" | grep -E "(res|response)\.(send|json|end|status\([0-9]+\)\.(send|json|end))\([^)]*\.(stack|trace)" 2>/dev/null)
+[ -n "$STACK_RES" ] && bail "STOP -- stack trace returned in HTTP response:" "$STACK_RES" \
+  "Leaks file paths, library versions, internal structure. Log server-side; return generic error to client."
+
+# 46. localStorage / sessionStorage for auth tokens (XSS-readable)
+LS_AUTH=$(echo "$ADDED" | grep -iE "(localStorage|sessionStorage)\.setItem\s*\(\s*['\"](token|jwt|access[_-]?token|auth[_-]?token|session|api[_-]?key|refresh[_-]?token|id[_-]?token|bearer)['\"]" 2>/dev/null)
+[ -n "$LS_AUTH" ] && echo "vibe-safe: auth token stored in localStorage/sessionStorage -- readable by any XSS; prefer httpOnly cookie
+$LS_AUTH"
+
+# ──────────── Tier 4: server-side injection ────────────
+
+# 47. SSRF — outbound HTTP with client-controlled URL
+SSRF=$(echo "$ADDED" | grep -E "(fetch|axios\.(get|post|put|delete|patch|head)|got|http\.get|http\.request|urlopen|requests\.(get|post|put|delete))\s*\(\s*req\.(body|query|params|headers)" 2>/dev/null)
+[ -n "$SSRF" ] && bail "STOP -- SSRF: outbound HTTP with client-controlled URL:" "$SSRF" \
+  "Validate URL against allowlist. Attacker can hit 169.254.169.254 (cloud metadata), localhost, internal services."
+
+# 48. Path traversal — file op with client-controlled path
+PATH_TRAV=$(echo "$ADDED" | grep -E "(readFile|readFileSync|createReadStream|sendFile|writeFile|writeFileSync|unlink|open)\s*\([^)]*req\.(body|query|params|headers)" 2>/dev/null)
+[ -n "$PATH_TRAV" ] && bail "STOP -- path traversal: filesystem op with client-controlled path:" "$PATH_TRAV" \
+  "basename() or validate against allowlist. Attacker can read ../../etc/passwd or overwrite arbitrary files."
+
+# 49. Open redirect — redirect to client-controlled URL
+OPEN_REDIR=$(echo "$ADDED" | grep -E "(res|response)\.redirect\s*\(\s*([0-9]+\s*,\s*)?req\.(body|query|params|headers)" 2>/dev/null)
+[ -n "$OPEN_REDIR" ] && bail "STOP -- open redirect: redirect target from client input:" "$OPEN_REDIR" \
+  "Validate against allowlist. Used in phishing to leverage your domain's reputation."
+
+# 50. Prototype pollution — merging client input into object
+PROTO=$(echo "$ADDED" | grep -E "(Object\.assign|_\.merge|_\.defaultsDeep|_\.assignIn|extend|deepmerge)\s*\([^)]*,\s*req\.(body|query|params)" 2>/dev/null)
+[ -n "$PROTO" ] && bail "STOP -- prototype pollution: merging client input into object:" "$PROTO" \
+  "__proto__/constructor.prototype in req.body can pollute Object.prototype. Use a strict allowlist or safe-merge library."
+
+# 51. NoSQL injection — $where or mass-assignment from req
+NOSQL=$(echo "$ADDED" | grep -E "\\\$where\s*:|\.(find|findOne|update|updateOne|updateMany|deleteOne|deleteMany|count)\s*\(\s*req\.(body|query|params)" 2>/dev/null)
+[ -n "$NOSQL" ] && bail "STOP -- NoSQL injection risk: \$where or mass-assignment from req:" "$NOSQL" \
+  "\$where with user input or .find(req.body) allows operator injection ({\"\$ne\": null}). Cast and allowlist fields."
+
+# ──────────── Tier 5: destructive ops & CI safety ────────────
+
+# 52. UPDATE/DELETE without WHERE clause
+DESTRUCTIVE_SQL=$(echo "$ADDED" | grep -iE "['\"\`](UPDATE\s+[a-zA-Z_][a-zA-Z0-9_.]*\s+SET\b|DELETE\s+FROM\s+[a-zA-Z_][a-zA-Z0-9_.]*)" 2>/dev/null | grep -ivE "WHERE|--.*WHERE" 2>/dev/null)
+[ -n "$DESTRUCTIVE_SQL" ] && bail "STOP -- UPDATE/DELETE without WHERE clause:" "$DESTRUCTIVE_SQL" \
+  "Affects every row in the table. Add WHERE or wrap in an explicit transaction with row limit."
+
+# 53. Install-time scripts added to package.json (supply-chain attack vector)
+if echo "$STAGED_FILES" | grep -q "package\.json"; then
+  POSTINSTALL=$(echo "$ADDED" | grep -E '"(postinstall|preinstall|prepare|install)"[[:space:]]*:' 2>/dev/null)
+  [ -n "$POSTINSTALL" ] && bail "PAUSE -- install-time script added to package.json:" "$POSTINSTALL" \
+    "Runs on every npm install for every user. Verify the command before merging."
+fi
+
+# 54. GitHub Actions: pull_request_target without head SHA pinning (fork PR code-exec)
+WF_FILES=$(echo "$STAGED_FILES" | grep -E "\.github/workflows/.*\.ya?ml$" 2>/dev/null)
+for wf in $WF_FILES; do
+  if grep -q "pull_request_target" "$wf" 2>/dev/null; then
+    HAS_PIN=$(grep -E "ref:\s*\\\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\}\}" "$wf" 2>/dev/null)
+    [ -z "$HAS_PIN" ] && bail "STOP -- pull_request_target workflow without ref pinning: $wf" "" \
+      "Fork PRs can execute arbitrary code with repo secrets. Pin checkout to github.event.pull_request.head.sha."
+  fi
+done
+
+# 55. continue-on-error / allow_failure on CI steps (silently disables checks)
+CI_FILES=$(echo "$STAGED_FILES" | grep -E "\.github/workflows/.*\.ya?ml$|\.gitlab-ci\.yml$|bitbucket-pipelines\.yml$" 2>/dev/null)
+for cf in $CI_FILES; do
+  CF_ADDED=$(git diff --cached -- "$cf" 2>/dev/null | grep "^+" | grep -v "^+++")
+  COE=$(echo "$CF_ADDED" | grep -iE "continue[-_]on[-_]error:\s*true|allow_failure:\s*true" 2>/dev/null)
+  [ -n "$COE" ] && echo "vibe-safe: continue-on-error/allow_failure: true in $cf -- silently masks CI failures
+$COE"
+done
+
+# ──────────── Tier 6: crypto pitfalls ────────────
+
+# 56. Weak hash (MD5/SHA1) used in credential context
+WEAK_HASH=$(echo "$ADDED" | grep -E "createHash\(['\"](md5|sha1)['\"]|hashlib\.(md5|sha1)\(|MessageDigest\.getInstance\(['\"](MD5|SHA-?1)['\"]" 2>/dev/null)
+if [ -n "$WEAK_HASH" ]; then
+  for f in $STAGED_FILES; do
+    case "$f" in *.js|*.ts|*.jsx|*.tsx|*.py|*.rb|*.java|*.kt) ;; *) continue ;; esac
+    FILE_ADDED=$(git diff --cached -- "$f" 2>/dev/null | grep "^+" | grep -v "^+++")
+    HASH=$(echo "$FILE_ADDED" | grep -E "createHash\(['\"](md5|sha1)['\"]|hashlib\.(md5|sha1)\(|MessageDigest\.getInstance\(['\"](MD5|SHA-?1)['\"]" 2>/dev/null)
+    if [ -n "$HASH" ]; then
+      CTX=$(echo "$FILE_ADDED" | grep -iE "password|secret|token|auth|credential|hmac|sign" 2>/dev/null)
+      [ -n "$CTX" ] && bail "STOP -- weak hash (MD5/SHA1) used in credential/auth context: $f" "$HASH" \
+        "MD5/SHA1 are broken. Use bcrypt/argon2/scrypt for passwords; SHA-256+ for HMAC/integrity."
+    fi
+  done
+fi
+
+# 57. AES ECB mode (deterministic, leaks block patterns)
+AES_ECB=$(echo "$ADDED" | grep -iE "createCipher(iv)?\s*\(\s*['\"]aes[-_]?[0-9]+[-_]?ecb|AES/ECB|Cipher\.getInstance\(['\"]AES['\"]?\s*\)" 2>/dev/null)
+[ -n "$AES_ECB" ] && bail "STOP -- AES in ECB mode (or default Java AES = ECB):" "$AES_ECB" \
+  "Use AES-GCM (authenticated) or AES-CBC with a random IV. ECB encrypts identical plaintext blocks identically."
+
+echo "vibe-safe: all 58 checks passed -- clear"
