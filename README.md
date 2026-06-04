@@ -137,7 +137,7 @@ After any session: `vibe-safe verify` — confirms the session is clean before y
 
 **Active, not passive.** Claude runs the actual shell commands — `git diff`, `git grep`, `git branch` — and reports what it finds. You don't fill out a form.
 
-**Pre-commit hook runs without Claude.** BEFORE mode installs `hooks/pre-commit` into `.git/hooks/pre-commit`. From then on, 24 mechanical checks run on every `git commit` whether or not you remember to invoke the skill. Branch check, credential scan, Danger Zone audit, suppression patterns, security sinks, private key files, env var drift, migration rollback, developer contracts — all in pure shell.
+**Pre-commit hook runs without Claude.** BEFORE mode installs `hooks/pre-commit` into `.git/hooks/pre-commit`. From then on, 70 mechanical checks run on every `git commit` whether or not you remember to invoke the skill. Branch check, credential scan, Danger Zone audit, suppression patterns, security sinks, private key files, env var drift, migration rollback, server-side injection (SSRF, path traversal, NoSQL, prototype pollution), authz mistakes, crypto pitfalls, migration revision conflicts, weak-default secrets, developer contracts — all in pure shell.
 
 **CI integration closes the bypass gap.** The hook can be skipped with `git commit --no-verify`. The GitHub Actions workflow cannot. BEFORE mode also installs `ci/vibe-safe-ci.sh` + `ci/workflow.yml` — the same checks run on every push and PR, with GitHub annotations for each finding. `--no-verify` is auto-escalated to ALARM if Claude proposes it.
 
@@ -189,7 +189,7 @@ After Claude writes code, before you commit. Runs `git diff HEAD` for unstaged c
 When you think Claude changed more than you asked — or when `max_changed_files` fires. Claude asks what the original task was, then evaluates every changed file: **IN SCOPE / LIKELY NEEDED / SUSPICIOUS / OUT OF SCOPE**. Removes out-of-scope files with your confirmation.
 
 ### COMMIT
-32 checks across credentials, Danger Zones, code health, security patterns, scope, env vars, migrations, and developer contracts — each with remediation. When all pass: Claude generates the commit message and runs `git commit` for you.
+70 checks across credentials, Danger Zones, code health, security patterns, server-side injection, authz/authn, crypto, scope, env vars, migrations, and developer contracts — each with remediation. When all pass: Claude generates the commit message and runs `git commit` for you.
 
 ### PR
 Reads `git diff main...HEAD`, asks why you're making the change, generates a complete PR description with what changed, what to test, flagged uncertainties, and suggested reviewers. Appends a **PR safety artifact** — a table showing what vibe-safe verified — so the reviewer sees the evidence without asking.
@@ -314,6 +314,43 @@ Five additional mode tests passed: BEFORE (main-branch stop), CONFLICT (auth fil
 | All pre-existing checks (24/24 CI, 25/25 hook) | no regressions | ✅ all passing |
 
 **29/29 hook tests passed, 24/24 CI tests passed.** `auth.ts` basename detection confirmed: files in auth/security namespace still hit Danger Zone before check 32; `logger.info` (backend logging pattern) correctly reaches check 32 and soft-flags without blocking.
+
+**v1.10.6–v1.10.8 credential-scan hardening (incident-driven):** A real production incident — a `DemoCard` component with hardcoded `email`/`password` demo accounts bundled into the public JS artifact — exposed three compounding misses in the credential regex. All three fixed and regression-tested:
+
+| Gap | Fix |
+|-----|-----|
+| Colon syntax `password: 'value'` not caught (only `=` was) | `CRED_PATTERN` extended to `[:=]` |
+| Special chars in values (`Demo@123!`) missed | `!@#` added to the value character class |
+| No email+password proximity detection | New **check 35** — blocks email + password literal in the same source file (skips test/fixture/seed/mock files) |
+
+Nested test-dir exclusion also fixed: `:!tests/` (root-only) → `:(exclude,glob)**/tests/**` so `backend/tests/`, `app/tests/` are properly excluded from the cross-scan. **9/9 gap-regression tests passed.**
+
+**v1.11.0 — 23 new checks across 6 tiers (41 tests, automated):** Expanded the hook from 35 → 58 checks after a deep gap analysis of "what patterns vibes-coding produces that grep can catch":
+- **Tier 1 — credential shapes:** connection strings with embedded creds, PEM key literals, JWT literals, public-bundled secret-named env vars (`NEXT_PUBLIC_*`/`VITE_*`), extended cloud-key prefixes (ASIA/ghs_/github_pat_/hf_/npm_/xox*/SG./whsec_)
+- **Tier 2 — authz/authn:** permission decisions from client input, admin routes without auth middleware, webhooks without signature verification, JWT `none` algorithm, JWT without expiry/algorithms whitelist
+- **Tier 3 — data exposure:** stack traces in HTTP responses, auth tokens in localStorage
+- **Tier 4 — server-side injection:** SSRF, path traversal, open redirect, prototype pollution, NoSQL injection
+- **Tier 5 — destructive ops & CI:** UPDATE/DELETE without WHERE, install-time package.json scripts, `pull_request_target` without SHA pinning, `continue-on-error` masking
+- **Tier 6 — crypto:** weak hash (MD5/SHA1) in credential context, AES ECB mode
+
+**41/41 tests passed.**
+
+**v1.11.1 — migration revision conflict (check 58, 4 tests):** After a parallel-migration incident (two `019_*` migrations both pointing to `018_client_deliverables`, breaking `alembic upgrade head`), added detection: when a migration is staged, its `down_revision` is compared against every committed migration — a shared parent (split chain) is blocked with both filenames and the correct head to chain from. **4/4 tests passed.**
+
+**v1.12.0 — Python pitfalls + supply chain (checks 59–64, 14 tests):**
+- unsafe YAML loading (RCE), native binary deserialization (RCE), bare `except:`, dynamic code-execution calls in source, `random` module in security-named Python files
+- Azure `AccountKey=` and GCP `private_key_id` added to `CRED_PATTERN`
+- Unpinned GitHub Actions (`@v*`/`@main`/`@latest`) — warns before the danger-zone bail so it's always visible
+
+**14/14 tests passed.**
+
+**v1.13.0 — weak defaults & misconfig (checks 65–68, 11 tests):**
+- Default/placeholder secret values (`JWT_SECRET = "changeme"`, `SIGNING_KEY = "your-secret-here"`) — catches the UPPER/camelCase/hyphenated secret names the case-sensitive check 2 misses
+- Insecure cookie flags (`httpOnly:false`/`secure:false` in cookie context)
+- World-writable permissions (`chmod 777` / `os.chmod 0o777`)
+- Go `math/rand` in security-named files — completes the crypto-RNG trio (JS check 26 → Python 63 → Go 68)
+
+**11/11 tests passed. Hook now runs 70 mechanical checks.**
 
 ---
 
