@@ -693,4 +693,34 @@ $PY_RND" "" ""
   fi
 fi
 
-echo "vibe-safe: all 66 checks passed -- clear"
+# ──────────── Tier 10: weak defaults & misconfig ────────────
+
+# 65. Default/placeholder secret assigned to a real secret name (LLM scaffold leakage)
+WEAK_SECRET=$(echo "$ADDED" | grep -iE "(jwt[_-]?secret|secret[_-]?key|session[_-]?secret|signing[_-]?key|encryption[_-]?key|api[_-]?secret|app[_-]?secret)['\"]?\s*[:=]\s*['\"](secret|changeme|change[_-]?me|password|passwd|123456|12345678|your[_-]?secret|your[_-]?secret[_-]?here|placeholder|dev|test|default|example|todo|s3cr3t|mysecret|supersecret)['\"]" 2>/dev/null)
+[ -n "$WEAK_SECRET" ] && bail "STOP -- default/placeholder value assigned to a secret:" "$WEAK_SECRET" \
+  "This is a guessable secret. Generate a real one (openssl rand -hex 32) and load it from an env var."
+
+# 66. Insecure cookie/session flags (httpOnly:false or secure:false)
+COOKIE_INSECURE=$(echo "$ADDED" | grep -iE "(httpOnly|secure)\s*:\s*false" 2>/dev/null)
+if [ -n "$COOKIE_INSECURE" ]; then
+  COOKIE_CTX=$(echo "$ADDED" | grep -iE "cookie|session|res\.cookie|set-cookie|sameSite|maxAge|expires" 2>/dev/null)
+  [ -n "$COOKIE_CTX" ] && echo "vibe-safe: insecure cookie flag (httpOnly:false / secure:false) -- token readable by JS or sent over HTTP
+$COOKIE_INSECURE"
+fi
+
+# 67. World-writable permissions (chmod 777 / 0o777)
+CHMOD_777=$(echo "$ADDED" | grep -E "chmod\s+-?R?\s*0?777|chmod\s*\([^,)]*,\s*0o?777|os\.chmod\([^,)]*,\s*0o?777|\.chmod\(\s*0o?777" 2>/dev/null)
+[ -n "$CHMOD_777" ] && bail "PAUSE -- world-writable permissions (777):" "$CHMOD_777" \
+  "Any user on the system can modify these files. Use the least-privilege mode (644 for files, 755 for dirs). Run: vibe-safe commit"
+
+# 68. Go math/rand in security-sensitive file (mirrors checks 26 & 63)
+GO_RND=$(git diff --cached -- '*.go' 2>/dev/null | grep "^+" | grep -v "^+++" | grep -E "\brand\.(Int|Intn|Int31|Int63|Float32|Float64|Perm|Shuffle)\s*\(" 2>/dev/null)
+if [ -n "$GO_RND" ]; then
+  GO_SEC_FILES=$(echo "$STAGED_FILES" | grep -iE "auth|token|session|crypto|key|secret|password|otp|reset" 2>/dev/null | grep -E "\.go$" 2>/dev/null)
+  if [ -n "$GO_SEC_FILES" ]; then
+    bail "STOP -- math/rand in security-related Go file: use crypto/rand instead
+$GO_RND" "" ""
+  fi
+fi
+
+echo "vibe-safe: all 70 checks passed -- clear"
